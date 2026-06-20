@@ -1,0 +1,24 @@
+{
+  "name": "hn-ai-feed",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hacker News 'best' stories as an AI-summarized RSS feed (exe.dev LLM gateway)",
+  "scripts": {
+    "start": "tsx index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "feed": "^5.2.1",
+    "jsdom": "^29.1.1",
+    "ls": "^1.0.0",
+    "p-limit": "^7.3.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^26.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

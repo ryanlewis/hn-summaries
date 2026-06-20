@@ -1,0 +1,25 @@
+[Unit]
+Description=HN Summaries — AI-summarized Hacker News RSS feed
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=exedev
+Group=exedev
+WorkingDirectory=/home/exedev/app
+# Absolute node path (mise-managed) so PATH resolution is irrelevant under systemd.
+ExecStart=/home/exedev/.local/share/mise/installs/node/24.14.1/bin/node /home/exedev/app/node_modules/.bin/tsx /home/exedev/app/index.ts
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=6
+Environment=NODE_ENV=production
+Environment=PORT=8000
+Environment=PUBLIC_URL=https://hn.rlew.io
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hn-summaries
+
+[Install]
+WantedBy=multi-user.target
