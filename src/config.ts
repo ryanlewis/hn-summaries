@@ -56,6 +56,7 @@ export const PUBLIC_ORIGIN = (
   .replace(/\/feed$/, "");
 export const FEED_PATH = "/feed";
 export const FEED_URL = `${PUBLIC_ORIGIN}${FEED_PATH}`;
+export const REPO_URL = "https://github.com/ryanlewis/hn-summaries";
 
 // --- Cache ---
 export const CACHE_PATH = fileURLToPath(

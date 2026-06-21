@@ -8,6 +8,7 @@ import {
   FEED_URL,
   HN_COMMENTS_URL,
   MAX_FEED_COUNT,
+  REPO_URL,
 } from "./config.js";
 import type { CachedStory } from "./cache.js";
 import {
@@ -185,7 +186,7 @@ export function buildLandingPage(
   </div>
   ${body}
 
-  <footer>Refreshes hourly · summaries by Claude Sonnet 4.6 · content © its authors</footer>
+  <footer>Refreshes hourly · summaries by Claude Sonnet 4.6 · <a href="${REPO_URL}">source on GitHub</a> · content © its authors</footer>
 </div>
 <script>
   document.querySelector(".copy")?.addEventListener("click", async (e) => {
