@@ -9,9 +9,11 @@ export const HN_COMMENTS_URL = (id: number) =>
   `https://news.ycombinator.com/item?id=${id}`;
 
 // --- LLM gateway (exe.dev; auto-authenticates the VM, no API key needed) ---
+// exe.dev LLM gateway. Anthropic Messages API at <base>/v1/messages; the VM is
+// auto-authenticated (the equivalent of ANTHROPIC_BASE_URL=https://llm.int.exe.xyz
+// with an implicit key), so no API key is sent.
 export const LLM_ENDPOINT =
-  process.env.LLM_ENDPOINT ??
-  "http://169.254.169.254/gateway/llm/anthropic/v1/messages";
+  process.env.LLM_ENDPOINT ?? "https://llm.int.exe.xyz/v1/messages";
 export const LLM_MODEL = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
 export const ANTHROPIC_VERSION = "2023-06-01";
 export const LLM_MAX_TOKENS = 400; // output cap; the summary's length, not the reading budget
@@ -48,7 +50,7 @@ export const MAX_FEED_COUNT = 200;
 export const PORT = Number(process.env.PORT ?? 8000);
 // Public origin (no trailing slash, no path). Feed lives at <origin>/feed.
 export const PUBLIC_ORIGIN = (
-  process.env.PUBLIC_URL ?? "https://hn-summaries.exe.xyz"
+  process.env.PUBLIC_URL ?? "https://hn.rlew.io"
 )
   .replace(/\/+$/, "")
   .replace(/\/feed$/, "");
