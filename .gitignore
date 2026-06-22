@@ -3,3 +3,4 @@ data/
 *.log
 .claude/settings.local.json
 smoke.ts
+local.options.json

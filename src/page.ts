@@ -13,6 +13,7 @@ import {
   REPO_URL,
   SUMMARY_PROVIDER,
 } from "./config.js";
+import { options } from "./options.js";
 
 const SUMMARY_MODEL = SUMMARY_PROVIDER === "anthropic" ? LLM_MODEL : OPENAI_MODEL;
 import type { CachedStory } from "./cache.js";
@@ -165,6 +166,7 @@ export function buildLandingPage(
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
+${options.extraHeadHtml ?? ""}
 </head>
 <body>
 <div class="wrap">

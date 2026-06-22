@@ -1,0 +1,4 @@
+{
+  "_comment": "Copy to local.options.json (gitignored) for per-deployment, local-only settings kept out of the repo. See src/options.ts.",
+  "extraHeadHtml": "<script defer src=\"https://analytics.example.com/script.js\" data-website-id=\"REPLACE-WITH-YOUR-WEBSITE-ID\"></script>"
+}
