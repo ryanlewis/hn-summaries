@@ -17,18 +17,16 @@ Examples: [`/feed?count=10`](https://hn.rlew.io/feed?count=10), [`/feed?min_poin
 
 ## How it works
 
-```
-HN Firebase API ──> fetch best IDs + stories + top comments
-                      │
-                      ├─> fetch & extract article text (Readability/jsdom)
-                      │        └─ non-HTML / paywall / no URL ─> fall back to the discussion
-                      │
-                      └─> summarize (exe.dev ChatGPT/Codex proxy — gpt-5.5)
-                                   │
-                            JSON cache (data/cache.json)
-                                   │
-                      ┌────────────┴────────────┐
-                   /feed (RSS 2.0)          / (HTML landing)
+```mermaid
+flowchart TD
+    HN["HN Firebase API"] --> Fetch["fetch best IDs + stories + top comments"]
+    Fetch --> Extract["fetch &amp; extract article text<br/>(Readability/jsdom)"]
+    Extract -->|"non-HTML / paywall / no URL"| Fallback["fall back to the discussion"]
+    Extract --> Summarize["summarize<br/>(exe.dev ChatGPT/Codex proxy — gpt-5.5)"]
+    Fallback --> Summarize
+    Summarize --> Cache["JSON cache<br/>(data/cache.json)"]
+    Cache --> Feed["/feed (RSS 2.0)"]
+    Cache --> Landing["/ (HTML landing)"]
 ```
 
 A single long-running Node process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary (pruned only after a retention window), so it isn't re-summarized when it bounces back.
