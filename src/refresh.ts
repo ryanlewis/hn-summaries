@@ -11,7 +11,7 @@ import {
 import {
   getStories,
   loadCache,
-  pruneCache,
+  pruneStale,
   saveCache,
   type CachedStory,
 } from "./cache.js";
@@ -97,6 +97,8 @@ async function processStory(
     isFallback,
     generatedAt: Date.now(),
     rank,
+    onList: true,
+    lastSeenAt: Date.now(),
   };
 }
 
@@ -115,24 +117,33 @@ export async function runRefresh(): Promise<void> {
       console.warn("[refresh] best list empty — leaving cache untouched");
       return;
     }
+    const now = Date.now();
+    const currentIds = new Set(bestIds);
     const rankOf = new Map<number, number>();
     bestIds.forEach((id, i) => rankOf.set(id, i));
 
-    const removed = pruneCache(cache, new Set(bestIds));
-
-    // Update ranks on already-cached stories (rank shifts even without resummarizing).
-    for (const id of bestIds) {
-      const existing = cache.stories[String(id)];
-      if (existing) existing.rank = rankOf.get(id)!;
+    // Mark every cached story on/off the current best list. On-list stories get a
+    // fresh rank + lastSeenAt; off-list stories keep their summary (so a bounce-back
+    // isn't re-summarized) and start/continue their retention clock.
+    for (const story of Object.values(cache.stories)) {
+      const on = currentIds.has(story.id);
+      story.onList = on;
+      if (on) {
+        story.rank = rankOf.get(story.id)!;
+        story.lastSeenAt = now;
+      } else if (!story.lastSeenAt) {
+        story.lastSeenAt = now;
+      }
     }
 
     const allNew = bestIds.filter((id) => !cache.stories[String(id)]);
     const toProcess = allNew.slice(0, MAX_NEW_PER_REFRESH);
     const deferred = allNew.length - toProcess.length;
+    const removed = pruneStale(cache, now); // only stories off-list past the retention window
     console.log(
       `[refresh] ${bestIds.length} best; ${toProcess.length} new to summarize${
         deferred > 0 ? ` (+${deferred} deferred to next cycle by cap)` : ""
-      }; ${removed} pruned`,
+      }; ${removed} pruned; cache ${Object.keys(cache.stories).length}`,
     );
 
     const limit = pLimit(CONCURRENCY_LIMIT);

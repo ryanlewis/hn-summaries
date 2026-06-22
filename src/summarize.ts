@@ -1,13 +1,19 @@
-// exe.dev LLM gateway client (Anthropic Messages API-compatible).
-// The VM is auto-authenticated by the gateway, so no API key is sent.
+// Summarization client. Two backends (see SUMMARY_PROVIDER in config.ts):
+//   - "openai-responses": exe.dev ChatGPT/Codex proxy, streaming Responses API.
+//     Draws on the ChatGPT subscription, not the metered LLM token allowance.
+//   - "anthropic": exe.dev LLM gateway, Anthropic Messages API (claude-sonnet-4-6).
+// Both auto-authenticate the VM, so no API key is sent.
 import {
   ANTHROPIC_VERSION,
   LLM_ENDPOINT,
   LLM_MAX_TOKENS,
   LLM_MODEL,
   LLM_TIMEOUT_MS,
+  OPENAI_ENDPOINT,
+  OPENAI_MODEL,
   RETRY_ATTEMPTS,
   RETRY_BASE_DELAY_MS,
+  SUMMARY_PROVIDER,
 } from "./config.js";
 
 const SYSTEM_PROMPT =
@@ -39,7 +45,11 @@ export async function summarize(input: SummarizeInput): Promise<string> {
   const userMessage = input.articleText
     ? buildArticlePrompt(input)
     : buildFallbackPrompt(input);
-  return callWithRetry(userMessage);
+  const call =
+    SUMMARY_PROVIDER === "anthropic"
+      ? () => callAnthropic(userMessage)
+      : () => callOpenAIResponses(userMessage);
+  return callWithRetry(call);
 }
 
 function buildArticlePrompt(i: SummarizeInput): string {
@@ -71,12 +81,12 @@ ${i.commentsText || "(no comments yet)"}
 In 3-5 sentences, explain what this story is about based on the title and discussion, then 1-2 sentences on how the Hacker News community is reacting. Begin your response with "Article unavailable — ". Keep the whole thing under 120 words.`;
 }
 
-async function callWithRetry(userMessage: string): Promise<string> {
+async function callWithRetry(fn: () => Promise<string>): Promise<string> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
     try {
-      return await callLLM(userMessage);
+      return await fn();
     } catch (e) {
       lastErr = e;
       const status = e instanceof LLMError ? e.status : undefined;
@@ -84,10 +94,79 @@ async function callWithRetry(userMessage: string): Promise<string> {
       if (status && status >= 400 && status < 500 && status !== 429) throw e;
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("LLM call failed");
+  throw lastErr instanceof Error ? lastErr : new Error("summarize failed");
 }
 
-async function callLLM(userMessage: string): Promise<string> {
+/** exe.dev ChatGPT/Codex proxy — OpenAI Responses API, streamed (SSE). The backend
+ *  requires stream:true + store:false, an `input` list, and rejects max_output_tokens. */
+async function callOpenAIResponses(userMessage: string): Promise<string> {
+  const res = await fetch(OPENAI_ENDPOINT, {
+    method: "POST",
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      stream: true,
+      store: false,
+      instructions: SYSTEM_PROMPT,
+      input: [{ role: "user", content: userMessage }],
+    }),
+  });
+
+  if (!res.ok || !res.body) {
+    let detail = "";
+    try {
+      detail = (await res.text()).slice(0, 300);
+    } catch {
+      /* ignore */
+    }
+    throw new LLMError(`OpenAI HTTP ${res.status} ${detail}`, res.status);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let streamErr: string | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      let evt: { type?: string; delta?: string };
+      try {
+        evt = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      if (evt.type === "response.output_text.delta") {
+        text += evt.delta ?? "";
+      } else if (evt.type === "response.failed" || evt.type === "error") {
+        streamErr = payload.slice(0, 200);
+      }
+    }
+  }
+
+  const out = text.trim();
+  if (!out) {
+    throw new LLMError(
+      streamErr
+        ? `OpenAI stream error: ${streamErr}`
+        : "OpenAI returned empty content",
+    );
+  }
+  return out;
+}
+
+/** exe.dev LLM gateway — Anthropic Messages API. */
+async function callAnthropic(userMessage: string): Promise<string> {
   const res = await fetch(LLM_ENDPOINT, {
     method: "POST",
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),

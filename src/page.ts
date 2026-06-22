@@ -7,9 +7,14 @@ import {
   FEED_PATH,
   FEED_URL,
   HN_COMMENTS_URL,
+  LLM_MODEL,
   MAX_FEED_COUNT,
+  OPENAI_MODEL,
   REPO_URL,
+  SUMMARY_PROVIDER,
 } from "./config.js";
+
+const SUMMARY_MODEL = SUMMARY_PROVIDER === "anthropic" ? LLM_MODEL : OPENAI_MODEL;
 import type { CachedStory } from "./cache.js";
 import {
   escapeAttr,
@@ -186,7 +191,7 @@ export function buildLandingPage(
   </div>
   ${body}
 
-  <footer>Refreshes hourly · summaries by Claude Sonnet 4.6 · <a href="${REPO_URL}">source on GitHub</a> · content © its authors</footer>
+  <footer>Refreshes hourly · summaries by ${escapeHtml(SUMMARY_MODEL)} · <a href="${REPO_URL}">source on GitHub</a> · content © its authors</footer>
 </div>
 <script>
   document.querySelector(".copy")?.addEventListener("click", async (e) => {

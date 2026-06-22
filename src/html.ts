@@ -55,7 +55,7 @@ export function selectStories(
   opts: { count: number; minPoints: number },
 ): CachedStory[] {
   return stories
-    .filter((s) => s.score >= opts.minPoints)
+    .filter((s) => s.onList !== false && s.score >= opts.minPoints)
     .sort((a, b) => a.rank - b.rank)
     .slice(0, opts.count);
 }

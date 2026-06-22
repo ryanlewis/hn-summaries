@@ -7,6 +7,7 @@ import {
   CACHE_PATH,
   CACHE_TMP_PATH,
   CACHE_VERSION,
+  OFFLIST_RETENTION_MS,
 } from "./config.js";
 
 export interface CachedStory {
@@ -21,6 +22,8 @@ export interface CachedStory {
   isFallback: boolean; // true when the article couldn't be read
   generatedAt: number; // Date.now() when summarized
   rank: number; // position in the best list (for ordering)
+  onList?: boolean; // currently on the HN best list (only these appear in the feed)
+  lastSeenAt?: number; // Date.now() of the last refresh this was on the best list
 }
 
 export interface CacheFile {
@@ -60,11 +63,15 @@ export async function saveCache(cache: CacheFile): Promise<void> {
   memory = cache;
 }
 
-/** Drop cached stories whose ids are no longer in the current best list. */
-export function pruneCache(cache: CacheFile, keepIds: Set<number>): number {
+/**
+ * Drop only stories that have been OFF the best list longer than the retention
+ * window. Stories still on the list, or recently off it, are kept so a story that
+ * bounces off and back isn't re-summarized.
+ */
+export function pruneStale(cache: CacheFile, now: number): number {
   let removed = 0;
-  for (const key of Object.keys(cache.stories)) {
-    if (!keepIds.has(Number(key))) {
+  for (const [key, s] of Object.entries(cache.stories)) {
+    if (s.onList === false && now - (s.lastSeenAt ?? 0) > OFFLIST_RETENTION_MS) {
       delete cache.stories[key];
       removed++;
     }

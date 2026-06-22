@@ -23,7 +23,7 @@ HN Firebase API ──> fetch best IDs + stories + top comments
                       ├─> fetch & extract article text (Readability/jsdom)
                       │        └─ non-HTML / paywall / no URL ─> fall back to the discussion
                       │
-                      └─> summarize (Claude Sonnet 4.6 via the exe.dev LLM gateway)
+                      └─> summarize (exe.dev ChatGPT/Codex proxy — gpt-5.5)
                                    │
                             JSON cache (data/cache.json)
                                    │
@@ -31,7 +31,9 @@ HN Firebase API ──> fetch best IDs + stories + top comments
                    /feed (RSS 2.0)          / (HTML landing)
 ```
 
-A single long-running Node process refreshes the best list **hourly**, summarizing only stories it hasn't seen before (cached summaries are never regenerated), and serves the feed from an in-memory + on-disk cache. Summaries are generated through the [exe.dev LLM gateway](https://exe.dev/docs/shelley/llm-gateway), which authenticates the VM automatically — **no API key is stored anywhere**.
+A single long-running Node process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary (pruned only after a retention window), so it isn't re-summarized when it bounces back.
+
+Summaries are generated through the exe.dev internal proxies, which authenticate the VM automatically — **no API key is stored anywhere**. Two backends are selectable via `SUMMARY_PROVIDER`: the [ChatGPT/Codex proxy](https://exe.dev/docs/integrations-github) (`gpt-5.5`, default — draws on the ChatGPT subscription rather than the metered token allowance) or the [LLM gateway](https://exe.dev/docs/shelley/llm-gateway) (`claude-sonnet-4-6`).
 
 ### Endpoints
 
@@ -44,7 +46,7 @@ A single long-running Node process refreshes the best list **hourly**, summarizi
 
 ## Running locally
 
-Requires Node 22+ (built on 24). Summarization needs to run on an exe.dev VM (for the keyless gateway) — or point `LLM_ENDPOINT`/`LLM_MODEL` at your own Anthropic-compatible endpoint.
+Requires Node 22+ (built on 24). Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services.
 
 ```bash
 npm install
@@ -62,10 +64,11 @@ Environment variables:
 |---|---|---|
 | `PORT` | `8000` | Listen port. |
 | `PUBLIC_URL` | `https://hn.rlew.io` | Canonical origin used in the feed's self-link and the landing page. |
-| `LLM_ENDPOINT` | exe.dev gateway | Anthropic Messages API-compatible endpoint. |
-| `LLM_MODEL` | `claude-sonnet-4-6` | Summarization model. |
+| `SUMMARY_PROVIDER` | `openai-responses` | Backend: `openai-responses` (ChatGPT/Codex proxy) or `anthropic` (LLM gateway). |
+| `OPENAI_ENDPOINT` / `OPENAI_MODEL` | ChatGPT proxy · `gpt-5.5` | Used when provider is `openai-responses`. |
+| `LLM_ENDPOINT` / `LLM_MODEL` | LLM gateway · `claude-sonnet-4-6` | Used when provider is `anthropic`. |
 
-Everything else — refresh interval, concurrency, article-size caps, per-refresh cost cap, comment count — lives in [`src/config.ts`](src/config.ts).
+Everything else — refresh interval, concurrency, article-size caps, per-refresh cost cap, off-list retention, comment count — lives in [`src/config.ts`](src/config.ts).
 
 ## Project layout
 
@@ -74,7 +77,7 @@ index.ts            entrypoint: start server, refresh on boot, schedule hourly
 src/config.ts       all tunables
 src/hn.ts           Hacker News Firebase API client
 src/extract.ts      article fetch (content-type/size guards) + Readability; HTML→text
-src/summarize.ts    exe.dev gateway client, prompt templates, retry/backoff
+src/summarize.ts    summarization backends (ChatGPT proxy + LLM gateway), prompts, retry
 src/cache.ts        JSON cache (in-memory singleton, atomic write, prune)
 src/refresh.ts      refresh pipeline (bounded concurrency)
 src/feed.ts         RSS 2.0 rendering

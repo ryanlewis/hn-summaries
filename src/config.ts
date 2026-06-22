@@ -16,8 +16,17 @@ export const LLM_ENDPOINT =
   process.env.LLM_ENDPOINT ?? "https://llm.int.exe.xyz/v1/messages";
 export const LLM_MODEL = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
 export const ANTHROPIC_VERSION = "2023-06-01";
-export const LLM_MAX_TOKENS = 400; // output cap; the summary's length, not the reading budget
-export const LLM_TIMEOUT_MS = 45_000;
+export const LLM_MAX_TOKENS = 400; // output cap (Anthropic path); the summary's length, not the reading budget
+export const LLM_TIMEOUT_MS = 90_000; // reasoning models (gpt-5.5) can take longer
+
+// Summarization backend.
+//   "openai-responses" — exe.dev ChatGPT/Codex proxy (streaming Responses API).
+//      Draws on the ChatGPT subscription instead of the metered LLM token allowance.
+//   "anthropic" — the LLM gateway (claude-sonnet-4-6), metered against the allowance.
+export const SUMMARY_PROVIDER = process.env.SUMMARY_PROVIDER ?? "openai-responses";
+export const OPENAI_ENDPOINT =
+  process.env.OPENAI_ENDPOINT ?? "https://chatgpt.int.exe.xyz/v1/responses";
+export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.5";
 
 // --- Refresh / pipeline ---
 export const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // hourly
@@ -64,3 +73,7 @@ export const CACHE_PATH = fileURLToPath(
 );
 export const CACHE_TMP_PATH = CACHE_PATH + ".tmp";
 export const CACHE_VERSION = 1 as const;
+// Keep summaries for stories that temporarily fall off the best list, so a story
+// that bounces off and back isn't re-summarized. Off-list entries are pruned only
+// once they've been gone this long (the best list's bottom churns hourly).
+export const OFFLIST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
