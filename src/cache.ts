@@ -20,6 +20,8 @@ export interface CachedStory {
   descendants: number; // comment count
   summary: string;
   isFallback: boolean; // true when the article couldn't be read
+  fallbackReason?: string; // why the article was unavailable (only set when isFallback)
+  fallbackAttempts?: number; // re-extraction attempts made while in fallback (retry budget)
   generatedAt: number; // Date.now() when summarized
   rank: number; // position in the best list (for ordering)
   onList?: boolean; // currently on the HN best list (only these appear in the feed)

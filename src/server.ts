@@ -70,6 +70,23 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   if (url.pathname === "/status") {
+    // Fallback breakdown over the stories that actually appear in the feed (on-list),
+    // for measuring extraction quality / the browser-tier's effect before vs. after.
+    const onList = stories.filter((s) => s.onList !== false);
+    const fallbackStories = onList.filter((s) => s.isFallback);
+    const byReason: Record<string, number> = {};
+    for (const s of fallbackStories) {
+      const reason = s.fallbackReason ?? "unknown";
+      byReason[reason] = (byReason[reason] ?? 0) + 1;
+    }
+    const fallbacks = {
+      onList: onList.length,
+      count: fallbackStories.length,
+      percent: onList.length
+        ? Math.round((1000 * fallbackStories.length) / onList.length) / 10
+        : 0,
+      byReason,
+    };
     const nextIn = refreshState.lastRefreshAt
       ? Math.max(
           0,
@@ -92,6 +109,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       refreshRunning: refreshState.running,
       nextRefreshInSeconds: nextIn,
       lastError: refreshState.lastError,
+      fallbacks,
     });
   }
 

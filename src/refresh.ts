@@ -5,6 +5,9 @@ import {
   COMMENTS_TO_FETCH,
   COMMENT_MAX_CHARS,
   CONCURRENCY_LIMIT,
+  FALLBACK_RETRY_ENABLED,
+  MAX_FALLBACK_RETRIES,
+  MAX_FALLBACK_RETRIES_PER_CYCLE,
   MAX_NEW_PER_REFRESH,
   SELFPOST_TEXT_MAX_CHARS,
 } from "./config.js";
@@ -15,7 +18,7 @@ import {
   saveCache,
   type CachedStory,
 } from "./cache.js";
-import { extractArticleText, htmlToText } from "./extract.js";
+import { extractArticleTextTiered, htmlToText } from "./extract.js";
 import { fetchBestIds, fetchComment, fetchStory } from "./hn.js";
 import { summarize } from "./summarize.js";
 
@@ -70,7 +73,7 @@ async function processStory(
     }
     if (!articleText) fallbackReason = "self-post without text";
   } else {
-    const extracted = await extractArticleText(story.url);
+    const extracted = await extractArticleTextTiered(story.url);
     if (extracted.ok) articleText = extracted.text;
     else fallbackReason = extracted.reason;
   }
@@ -95,11 +98,48 @@ async function processStory(
     descendants: story.descendants ?? 0,
     summary,
     isFallback,
+    fallbackReason: isFallback ? fallbackReason : undefined,
     generatedAt: Date.now(),
     rank,
     onList: true,
     lastSeenAt: Date.now(),
   };
+}
+
+/**
+ * Re-extract an existing on-list fallback story in place. Always bumps the attempt
+ * counter; only pays for a re-summarize when extraction now succeeds. Returns true if
+ * the story was recovered (flipped out of fallback). Mutates `story` directly.
+ */
+async function retryFallback(story: CachedStory): Promise<boolean> {
+  story.fallbackAttempts = (story.fallbackAttempts ?? 0) + 1;
+  if (!story.url) return false; // self-post fallbacks aren't recoverable by extraction
+
+  const extracted = await extractArticleTextTiered(story.url);
+  if (!extracted.ok) {
+    story.fallbackReason = extracted.reason; // record the latest reason
+    return false;
+  }
+
+  // Extraction succeeded this time — re-summarize against the real article. Refresh the
+  // item to pick up current comments/score too.
+  const fresh = await fetchStory(story.id);
+  const commentsText = await gatherComments(fresh?.kids);
+  const summary = await summarize({
+    title: story.title,
+    url: story.url,
+    articleText: extracted.text,
+    commentsText,
+  });
+  story.summary = summary;
+  story.isFallback = false;
+  story.fallbackReason = undefined;
+  story.generatedAt = Date.now();
+  if (fresh) {
+    story.score = fresh.score ?? story.score;
+    story.descendants = fresh.descendants ?? story.descendants;
+  }
+  return true;
 }
 
 /** Run a single refresh cycle. Safe to call repeatedly; no-ops if already running. */
@@ -173,6 +213,55 @@ export async function runRefresh(): Promise<void> {
         }),
       ),
     );
+
+    // Retry pass: re-extract a bounded set of existing on-list fallbacks so the browser
+    // tier (and recovered sites) can backfill stories already in the cache, which the
+    // normal path never re-summarizes. Least-tried first so every fallback gets a fair
+    // first attempt before any is retried again.
+    if (FALLBACK_RETRY_ENABLED) {
+      const retryable = Object.values(cache.stories)
+        .filter(
+          (s) =>
+            s.onList !== false &&
+            s.isFallback &&
+            s.url &&
+            (s.fallbackAttempts ?? 0) < MAX_FALLBACK_RETRIES,
+        )
+        // Least-tried first (fair first attempt for all), then by rank so the most
+        // visible top-of-feed fallbacks are recovered soonest.
+        .sort(
+          (a, b) =>
+            (a.fallbackAttempts ?? 0) - (b.fallbackAttempts ?? 0) ||
+            a.rank - b.rank,
+        )
+        .slice(0, MAX_FALLBACK_RETRIES_PER_CYCLE);
+
+      if (retryable.length > 0) {
+        let recovered = 0;
+        await Promise.all(
+          retryable.map((story) =>
+            limit(async () => {
+              try {
+                if (await retryFallback(story)) {
+                  recovered++;
+                  console.log(
+                    `[refresh] recovered fallback #${story.id} ${story.title.slice(0, 70)}`,
+                  );
+                }
+              } catch (err) {
+                console.error(
+                  `[refresh] fallback retry ${story.id} failed:`,
+                  err instanceof Error ? err.message : err,
+                );
+              }
+            }),
+          ),
+        );
+        console.log(
+          `[refresh] fallback retry: ${recovered}/${retryable.length} recovered`,
+        );
+      }
+    }
 
     cache.updatedAt = Date.now();
     await saveCache(cache);

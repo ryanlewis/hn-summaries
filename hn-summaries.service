@@ -8,8 +8,9 @@ Type=simple
 User=exedev
 Group=exedev
 WorkingDirectory=/home/exedev/app
-# Absolute node path (mise-managed) so PATH resolution is irrelevant under systemd.
-ExecStart=/home/exedev/.local/share/mise/installs/node/24.14.1/bin/node /home/exedev/app/node_modules/.bin/tsx /home/exedev/app/index.ts
+# Absolute bun path (mise-managed) so PATH resolution is irrelevant under systemd.
+# Bun runs the TS directly (no tsx) and provides Bun.WebView for browser extraction.
+ExecStart=/home/exedev/.local/share/mise/installs/bun/1.3.14/bin/bun /home/exedev/app/index.ts
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=120
@@ -17,6 +18,10 @@ StartLimitBurst=6
 Environment=NODE_ENV=production
 Environment=PORT=8000
 Environment=PUBLIC_URL=https://hn.rlew.io
+# Chrome/Chromium for Bun.WebView's browser-extraction tier (Linux drives it over CDP).
+# Installed rootless via `bunx playwright install chromium`; update the version dir
+# (chromium-NNNN) if Playwright re-downloads a newer build.
+Environment=BUN_CHROME_PATH=/home/exedev/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hn-summaries

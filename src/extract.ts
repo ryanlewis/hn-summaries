@@ -8,6 +8,8 @@ import {
   ARTICLE_FETCH_TIMEOUT_MS,
   ARTICLE_MAX_BYTES,
   ARTICLE_TEXT_MAX_CHARS,
+  BROWSER_FALLBACK_ENABLED,
+  BROWSER_RECOVERABLE_REASONS,
   USER_AGENT,
 } from "./config.js";
 
@@ -111,6 +113,16 @@ export async function extractArticleText(
 
   if (!html.trim()) return { ok: false, reason: "empty" };
 
+  return htmlToArticleText(html, url);
+}
+
+/**
+ * Run Readability over a chunk of HTML and return the readable text (or a fail
+ * reason). Shared by the fetch path above and the browser path (extract-browser.ts),
+ * so both use one extraction implementation. `url` is the document base URL.
+ */
+export function htmlToArticleText(html: string, url: string): ExtractionResult {
+  if (!html.trim()) return { ok: false, reason: "empty" };
   try {
     const dom = new JSDOM(html, {
       url,
@@ -125,6 +137,37 @@ export async function extractArticleText(
   } catch {
     return { ok: false, reason: "error" };
   }
+}
+
+/**
+ * Tiered extraction: try the plain fetch+Readability path first; if it fails with a
+ * reason a real browser can plausibly recover (see BROWSER_RECOVERABLE_REASONS), render
+ * the page with Bun.WebView and re-run Readability. Returns the fetch result unchanged
+ * when the browser tier is disabled, not applicable, or also fails — in the last case the
+ * reason is annotated so /status can tell "fetch failed" from "browser also failed".
+ */
+export async function extractArticleTextTiered(
+  url: string,
+): Promise<ExtractionResult> {
+  const fetched = await extractArticleText(url);
+  if (fetched.ok) return fetched;
+
+  if (
+    !BROWSER_FALLBACK_ENABLED ||
+    !(BROWSER_RECOVERABLE_REASONS as readonly string[]).includes(fetched.reason)
+  ) {
+    return fetched;
+  }
+
+  const { extractArticleViaBrowser } = await import("./extract-browser.js");
+  const rendered = await extractArticleViaBrowser(url);
+  if (rendered.ok) return rendered;
+
+  // Both tiers failed — keep the fetch-path reason but mark the browser also failed.
+  return {
+    ok: false,
+    reason: `${fetched.reason} (browser also failed)` as ExtractFailReason,
+  };
 }
 
 // --- HTML → plain text (HN comment & self-post bodies) ---

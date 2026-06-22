@@ -45,6 +45,41 @@ export const SELFPOST_TEXT_MAX_CHARS = 4_000;
 export const USER_AGENT =
   "Mozilla/5.0 (compatible; HN-Summaries/1.0; +https://hn-summaries.exe.xyz)";
 
+// --- Browser extraction (tiered fallback) ---
+// When the plain fetch+Readability path fails with a *recoverable* reason, a real
+// browser (Bun.WebView) renders the page and we re-run Readability over the rendered
+// DOM. This is far heavier than fetch, so it's gated, throttled separately, and only
+// invoked on the recoverable reasons below — never the default path.
+//
+// On Linux, Bun.WebView drives an installed Chrome/Chromium over the DevTools Protocol.
+// It finds the binary via (in order): backend.path, $BUN_CHROME_PATH, $PATH, common
+// system locations, then the Playwright cache. Install Chromium on the host or set
+// BUN_CHROME_PATH for this tier to work.
+export const BROWSER_FALLBACK_ENABLED =
+  (process.env.BROWSER_FALLBACK_ENABLED ?? "true") !== "false";
+export const BROWSER_CONCURRENCY = Number(process.env.BROWSER_CONCURRENCY ?? 2);
+export const BROWSER_TIMEOUT_MS = Number(process.env.BROWSER_TIMEOUT_MS ?? 20_000);
+// Short settle after the load event for late-rendering SPAs before grabbing the DOM.
+export const BROWSER_SETTLE_MS = Number(process.env.BROWSER_SETTLE_MS ?? 1_200);
+export const BROWSER_VIEWPORT_WIDTH = Number(process.env.BROWSER_VIEWPORT_WIDTH ?? 1280);
+export const BROWSER_VIEWPORT_HEIGHT = Number(process.env.BROWSER_VIEWPORT_HEIGHT ?? 900);
+// Fetch-path failures a browser render can plausibly recover. non-html / too-large are
+// excluded — a renderer won't turn a PDF or an oversized file into an article.
+export const BROWSER_RECOVERABLE_REASONS = ["error", "empty", "timeout"] as const;
+
+// --- Fallback retry ---
+// Already-cached fallbacks are never re-summarized by the normal path (ids in the cache
+// are skipped). This pass re-runs extraction on existing on-list fallbacks each cycle and
+// re-summarizes any that now succeed — recovering stories the browser tier can render or
+// that were transiently down. Each story is retried at most MAX_FALLBACK_RETRIES times so
+// hard paywalls/blocks aren't re-attempted forever; the per-cycle cap bounds the cost.
+export const FALLBACK_RETRY_ENABLED =
+  (process.env.FALLBACK_RETRY_ENABLED ?? "true") !== "false";
+export const MAX_FALLBACK_RETRIES = Number(process.env.MAX_FALLBACK_RETRIES ?? 3);
+export const MAX_FALLBACK_RETRIES_PER_CYCLE = Number(
+  process.env.MAX_FALLBACK_RETRIES_PER_CYCLE ?? 10,
+);
+
 // --- Comments (for the "HN reaction" sentence) ---
 export const COMMENTS_TO_FETCH = 10;
 export const COMMENT_MAX_CHARS = 400;
