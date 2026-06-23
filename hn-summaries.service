@@ -8,9 +8,9 @@ Type=simple
 User=exedev
 Group=exedev
 WorkingDirectory=/home/exedev/app
-# Absolute bun path (mise-managed) so PATH resolution is irrelevant under systemd.
+# Absolute bun path so PATH resolution is irrelevant under systemd.
 # Bun runs the TS directly (no tsx) and provides Bun.WebView for browser extraction.
-ExecStart=/home/exedev/.local/share/mise/installs/bun/1.3.14/bin/bun /home/exedev/app/index.ts
+ExecStart=/home/exedev/.bun/bin/bun /home/exedev/app/index.ts
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=120
@@ -19,9 +19,10 @@ Environment=NODE_ENV=production
 Environment=PORT=8000
 Environment=PUBLIC_URL=https://hn.rlew.io
 # Chrome/Chromium for Bun.WebView's browser-extraction tier (Linux drives it over CDP).
-# Installed rootless via `bunx playwright install chromium`; update the version dir
-# (chromium-NNNN) if Playwright re-downloads a newer build.
-Environment=BUN_CHROME_PATH=/home/exedev/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome
+# The app resolves the binary at startup (system browser, else newest Playwright cache),
+# so no version-pinned path is hardcoded here. Install one rootless with
+# `bun run install-browser`. Uncomment to force a specific binary:
+# Environment=BUN_CHROME_PATH=/path/to/chrome
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hn-summaries

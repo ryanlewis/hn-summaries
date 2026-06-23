@@ -46,7 +46,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 
 ## Running locally
 
-Requires [Bun](https://bun.sh) ≥1.3.12 (pinned to 1.3.14 — `Bun.WebView` powers the browser extraction tier). Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary (set `BUN_CHROME_PATH` or put it on `$PATH`); disable it with `BROWSER_FALLBACK_ENABLED=false`.
+Requires [Bun](https://bun.sh) ≥1.3.12 (pinned to 1.3.14 — `Bun.WebView` powers the browser extraction tier). Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary — install one with `bun run install-browser` (Playwright's Chromium), put one on `$PATH`, or point `BUN_CHROME_PATH` at it; the app auto-resolves whichever it finds at startup. Disable the tier with `BROWSER_FALLBACK_ENABLED=false`.
 
 ```bash
 bun install

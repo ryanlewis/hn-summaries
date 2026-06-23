@@ -6,7 +6,8 @@
   "description": "Hacker News 'best' stories as an AI-summarized RSS feed (exe.dev LLM gateway)",
   "scripts": {
     "start": "bun index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "install-browser": "bunx playwright install chromium"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

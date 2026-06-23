@@ -54,7 +54,7 @@ All endpoints/models are env-overridable. See `https://exe.dev/docs.md` for prox
 
 ## Deployment
 
-Runs as the systemd unit `hn-summaries` (repo copy: `hn-summaries.service`; installed at `/etc/systemd/system/`). Port 8000, `Restart=on-failure`, logs to journald. `ExecStart` is the absolute mise-managed **bun** binary (`…/installs/bun/1.3.14/bin/bun index.ts`); after changing the unit, copy it to `/etc/systemd/system/` and `sudo systemctl daemon-reload`.
+Runs as the systemd unit `hn-summaries` (repo copy: `hn-summaries.service`; installed at `/etc/systemd/system/`). Port 8000, `Restart=on-failure`, logs to journald. `ExecStart` is the absolute **bun** binary (`/home/exedev/.bun/bin/bun index.ts`); after changing the unit, copy it to `/etc/systemd/system/` and `sudo systemctl daemon-reload`.
 
 ```bash
 journalctl -u hn-summaries -f          # tail logs
@@ -63,7 +63,7 @@ sudo systemctl restart hn-summaries    # after pulling changes
 
 `PUBLIC_URL=https://hn.rlew.io` (set in the unit) is the canonical origin baked into feed/page links. The vanity domain is a CNAME to `hn-summaries.exe.xyz` with an exe.dev-issued cert.
 
-**Browser tier (Chromium).** The `Bun.WebView` fallback needs a Chrome/Chromium binary on the VM. The unit sets `Environment=BUN_CHROME_PATH=/usr/bin/chromium`; install Chromium there (or adjust the path / put it on `$PATH`). Disable the whole tier with `Environment=BROWSER_FALLBACK_ENABLED=false`. Other knobs (`BROWSER_CONCURRENCY`, `BROWSER_TIMEOUT_MS`, `BROWSER_SETTLE_MS`, viewport) live in `config.ts`, all env-overridable.
+**Browser tier (Chromium).** The `Bun.WebView` fallback needs a Chrome/Chromium binary on the VM. Install one rootless with `bun run install-browser` (= `bunx playwright install chromium`). At startup the app resolves a binary itself (`ensureChromePath` in `extract-browser.ts`) — honoring an explicit `BUN_CHROME_PATH`, else a system browser on `$PATH`/common locations, else the **newest** `~/.cache/ms-playwright/chromium-*` build — and logs which it picked (or warns if the tier is enabled but none is found). So the unit hardcodes **no** version-pinned path; a Playwright reinstall to a newer build is picked up automatically. Set `Environment=BUN_CHROME_PATH=…` only to force a specific binary. Disable the whole tier with `Environment=BROWSER_FALLBACK_ENABLED=false`. Other knobs (`BROWSER_CONCURRENCY`, `BROWSER_TIMEOUT_MS`, `BROWSER_SETTLE_MS`, viewport) live in `config.ts`, all env-overridable.
 
 ## Cache & data
 

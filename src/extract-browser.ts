@@ -6,15 +6,83 @@
 //
 // On Linux, Bun.WebView drives an installed Chrome/Chromium over CDP; the binary is
 // found via $BUN_CHROME_PATH / $PATH / system locations / the Playwright cache.
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import pLimit from "p-limit";
 import {
   BROWSER_CONCURRENCY,
+  BROWSER_FALLBACK_ENABLED,
   BROWSER_SETTLE_MS,
   BROWSER_TIMEOUT_MS,
   BROWSER_VIEWPORT_HEIGHT,
   BROWSER_VIEWPORT_WIDTH,
 } from "./config.js";
 import { htmlToArticleText, type ExtractionResult } from "./extract.js";
+
+// Resolve a Chrome/Chromium binary without pinning a version. Order:
+//   1. an explicit, existing $BUN_CHROME_PATH (operator override wins);
+//   2. a system browser on $PATH or in common locations;
+//   3. the newest Playwright-cached Chromium (chromium-NNNN/chrome-linux64/chrome).
+// Acquisition is `bun run install-browser` (bunx playwright install chromium); this
+// just finds whatever version that left behind, so a reinstall to a newer build
+// doesn't require touching the systemd unit. Returns null if nothing is installed.
+function findChromeBinary(): string | null {
+  const env = process.env.BUN_CHROME_PATH;
+  if (env && existsSync(env)) return env;
+
+  const names = [
+    "chromium",
+    "chromium-browser",
+    "google-chrome-stable",
+    "google-chrome",
+    "chrome",
+  ];
+  const pathDirs = (process.env.PATH ?? "").split(delimiter).filter(Boolean);
+  const dirs = [...pathDirs, "/usr/bin", "/usr/local/bin", "/snap/bin"];
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+
+  // Playwright cache: ~/.cache/ms-playwright/chromium-NNNN/chrome-linux64/chrome.
+  // Pick the highest build number so a fresh install supersedes an older one.
+  const cache = join(homedir(), ".cache", "ms-playwright");
+  try {
+    const builds = readdirSync(cache)
+      .filter((d) => /^chromium-\d+$/.test(d))
+      .map((d) => ({ dir: d, n: Number(d.slice("chromium-".length)) }))
+      .sort((a, b) => b.n - a.n);
+    for (const { dir } of builds) {
+      const candidate = join(cache, dir, "chrome-linux64", "chrome");
+      if (existsSync(candidate)) return candidate;
+    }
+  } catch {
+    /* no playwright cache */
+  }
+  return null;
+}
+
+// Resolve once at startup, log the outcome, and seed $BUN_CHROME_PATH so Bun.WebView's
+// own discovery uses the same binary. Warns (rather than throws) if the tier is enabled
+// but no browser exists — the pipeline still works, it just can't use this fallback.
+let chromeResolved = false;
+export function ensureChromePath(): void {
+  if (chromeResolved) return;
+  chromeResolved = true;
+  const bin = findChromeBinary();
+  if (bin) {
+    process.env.BUN_CHROME_PATH = bin;
+    console.log(`[extract-browser] using Chrome/Chromium: ${bin}`);
+  } else if (BROWSER_FALLBACK_ENABLED) {
+    console.warn(
+      "[extract-browser] no Chrome/Chromium found — browser fallback tier disabled. " +
+        "Install one with `bun run install-browser`.",
+    );
+  }
+}
 
 // Throttle browser renders independently of CONCURRENCY_LIMIT: each WebView spawns a
 // renderer process, so we keep far fewer of these in flight than plain fetches.
@@ -52,6 +120,7 @@ export function extractArticleViaBrowser(url: string): Promise<ExtractionResult>
     if (typeof Bun === "undefined" || typeof Bun.WebView !== "function") {
       return { ok: false, reason: "error" }; // not running under a WebView-capable Bun
     }
+    ensureChromePath();
     ensureShutdownHook();
 
     const view = new Bun.WebView({
