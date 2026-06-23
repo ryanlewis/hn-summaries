@@ -4,8 +4,10 @@
 // orange (#ff6600) as the sole accent; the ranked-list position is the signature.
 import {
   DEFAULT_FEED_COUNT,
+  DEFAULT_FEED_SORT,
   FEED_PATH,
   FEED_URL,
+  type FeedSort,
   HN_COMMENTS_URL,
   LLM_MODEL,
   MAX_FEED_COUNT,
@@ -18,12 +20,19 @@ import { options } from "./options.js";
 const SUMMARY_MODEL = SUMMARY_PROVIDER === "anthropic" ? LLM_MODEL : OPENAI_MODEL;
 import type { CachedStory } from "./cache.js";
 import {
+  bestListSize,
   escapeAttr,
   escapeHtml,
+  rankStanding,
   selectStories,
   siteDomain,
   summaryHtml,
 } from "./html.js";
+
+/** Self URL for a sort — default sort keeps the bare /feed URL; others carry ?sort=. */
+function feedUrlFor(sort: FeedSort): string {
+  return sort === DEFAULT_FEED_SORT ? FEED_URL : `${FEED_URL}?sort=${sort}`;
+}
 
 const PREVIEW_COUNT = 5;
 
@@ -39,16 +48,28 @@ function shortDate(unixSeconds: number): string {
 
 export function buildLandingPage(
   stories: CachedStory[],
-  meta: { updatedAt: number; totalCount: number },
+  meta: { updatedAt: number; totalCount: number; sort: FeedSort },
 ): string {
-  const latest = selectStories(stories, { count: PREVIEW_COUNT, minPoints: 0 });
+  const { sort } = meta;
+  const listSize = bestListSize(stories);
+  const latest = selectStories(stories, {
+    count: PREVIEW_COUNT,
+    minPoints: 0,
+    sort,
+  });
+  const feedUrl = feedUrlFor(sort);
   const updated =
     meta.updatedAt > 0 ? shortDate(Math.floor(meta.updatedAt / 1000)) : "—";
 
   const body =
     meta.totalCount === 0
       ? `<p class="empty">Warming up — the first batch of summaries is generating. Check back in a minute or two.</p>`
-      : latest.map(renderCard).join("\n");
+      : latest.map((s) => renderCard(s, sort, listSize)).join("\n");
+
+  const tab = (s: FeedSort, label: string) =>
+    `<a class="tab${s === sort ? " on" : ""}" href="/?sort=${s}"${
+      s === sort ? ' aria-current="true"' : ""
+    }>${label}</a>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -134,6 +155,26 @@ export function buildLandingPage(
   }
   .sectionhead .meta { font-family: var(--mono); font-size: .74rem; color: var(--faint); letter-spacing: .04em; }
 
+  /* Newest / Top-by-points switch */
+  .toggle { display: inline-flex; gap: .3rem; padding: .25rem; margin: 0 0 1rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 9px; }
+  .tab {
+    font-family: var(--mono); font-size: .8rem; font-weight: 500; color: var(--muted);
+    padding: .4rem .85rem; border-radius: 6px; white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); text-decoration: none; }
+  .tab.on { background: var(--accent); color: #1a1206; }
+  .note { color: var(--muted); font-size: .9rem; margin: 0 0 1.6rem; max-width: 40em; }
+  .note strong { color: var(--text); font-weight: 600; }
+
+  /* Per-card best-list standing (rank, roll-off, off-list) */
+  .standing {
+    font-family: var(--mono); font-size: .74rem !important; color: var(--muted) !important;
+    margin: .15rem 0 .55rem !important;
+  }
+  .standing.warn { color: var(--accent-soft) !important; }
+  .standing.off { color: var(--faint) !important; }
+
   .card {
     display: grid; grid-template-columns: 2.6rem 1fr; gap: .2rem 1rem;
     padding: 1.3rem 0; border-top: 1px solid var(--line);
@@ -180,20 +221,30 @@ ${/* Deliberately raw, UNescaped: operator-controlled <head> HTML (analytics tag
   <section class="sub">
     <p class="eyebrow">Subscribe</p>
     <div class="urlrow">
-      <span class="url" id="feedurl">${escapeHtml(FEED_URL)}</span>
-      <button class="copy" type="button" data-url="${escapeAttr(FEED_URL)}">Copy</button>
+      <span class="url" id="feedurl">${escapeHtml(feedUrl)}</span>
+      <button class="copy" type="button" data-url="${escapeAttr(feedUrl)}">Copy</button>
     </div>
     <ul class="params">
+      <li><code>?sort=date|points</code> — <strong>date</strong> (default): newest summary first, a rolling stream. <strong>points</strong>: the HN best-list ranking. <a class="ex" href="${FEED_PATH}?sort=points">/feed?sort=points</a></li>
       <li><code>?count=N</code> — stories to include (default ${DEFAULT_FEED_COUNT}, max ${MAX_FEED_COUNT}). <a class="ex" href="${FEED_PATH}?count=10">/feed?count=10</a></li>
       <li><code>?min_points=N</code> — only stories with ≥ N points. <a class="ex" href="${FEED_PATH}?min_points=300">/feed?min_points=300</a></li>
-      <li>Combine: <a class="ex" href="${FEED_PATH}?count=15&min_points=200">/feed?count=15&amp;min_points=200</a></li>
+      <li>Combine: <a class="ex" href="${FEED_PATH}?sort=points&count=15&min_points=200">/feed?sort=points&amp;count=15&amp;min_points=200</a></li>
     </ul>
   </section>
 
   <div class="sectionhead">
-    <p class="eyebrow" style="margin:0;">Latest</p>
+    <p class="eyebrow" style="margin:0;">${sort === "points" ? "Top by points" : "Newest"}</p>
     <span class="meta">updated ${escapeHtml(updated)} · ${meta.totalCount} cached</span>
   </div>
+  <div class="toggle" role="tablist" aria-label="Feed ordering">
+    ${tab("date", "Newest")}
+    ${tab("points", "Top by points")}
+  </div>
+  <p class="note">${
+    sort === "points"
+      ? "Ranked by HN best-list position. A story drops out the instant it leaves the best list — the ⚠ flag marks ones near the bottom, about to roll off."
+      : "Newest summaries first, so the feed keeps moving. Stories that fall off HN’s best list stay here until they age out (7 days); switch to <strong>Top by points</strong> for the live ranking."
+  }</p>
   ${body}
 
   <footer>Refreshes hourly · summaries by ${escapeHtml(SUMMARY_MODEL)} · <a href="${REPO_URL}">source on GitHub</a> · content © its authors</footer>
@@ -212,10 +263,21 @@ ${/* Deliberately raw, UNescaped: operator-controlled <head> HTML (analytics tag
 </html>`;
 }
 
-function renderCard(s: CachedStory): string {
+function renderCard(s: CachedStory, sort: FeedSort, listSize: number): string {
   const hnUrl = HN_COMMENTS_URL(s.id);
   const articleLink = s.url ?? hnUrl;
-  const rank = String(s.rank + 1).padStart(2, "0");
+  const standing = rankStanding(s, listSize);
+  // Off-list stories only surface in the rolling "date" view; their stale rank is meaningless,
+  // so blank the gutter rather than show a misleading number.
+  const rank = standing.offList ? "—" : String(s.rank + 1).padStart(2, "0");
+  let badge = "";
+  if (sort === "points") {
+    badge = `<p class="standing${standing.nearRolloff ? " warn" : ""}">${escapeHtml(
+      standing.label,
+    )}${standing.nearRolloff ? " · ⚠ about to roll off" : ""}</p>`;
+  } else if (standing.offList) {
+    badge = `<p class="standing off">⤓ ${escapeHtml(standing.label)} · kept until it ages out</p>`;
+  }
   const fallback = s.isFallback
     ? `<p class="fallback">Article unavailable — summary based on the HN discussion.</p>`
     : "";
@@ -226,6 +288,7 @@ function renderCard(s: CachedStory): string {
   <div class="rank">${rank}</div>
   <div>
     <h3><a href="${escapeAttr(articleLink)}">${escapeHtml(s.title)}</a></h3>
+    ${badge}
     ${fallback}
     ${summaryHtml(s.summary)}
     <p class="links"><a href="${escapeAttr(articleLink)}">Original article ↗</a><span class="sep">·</span><a href="${escapeAttr(hnUrl)}">HN comments ↗</a></p>

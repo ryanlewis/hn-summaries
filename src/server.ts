@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_FEED_COUNT,
+  DEFAULT_FEED_SORT,
+  FEED_SORTS,
+  type FeedSort,
   MAX_FEED_COUNT,
   PORT,
   REFRESH_INTERVAL_MS,
@@ -43,6 +46,12 @@ function intParam(value: string | null, fallback: number): number {
   if (value === null) return fallback;
   const n = Number.parseInt(value, 10);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function sortParam(value: string | null): FeedSort {
+  return (FEED_SORTS as readonly string[]).includes(value ?? "")
+    ? (value as FeedSort)
+    : DEFAULT_FEED_SORT;
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -118,6 +127,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const html = buildLandingPage(stories, {
       updatedAt: cache.updatedAt,
       totalCount: stories.length,
+      sort: sortParam(url.searchParams.get("sort")),
     });
     res.writeHead(200, {
       "content-type": "text/html; charset=utf-8",
@@ -128,10 +138,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   if (url.pathname === "/feed" || url.pathname === "/feed.xml") {
-    // The feed is built from on-list stories only (selectStories filters off-list out), so
-    // warm-up is "no servable stories yet", not "cache literally empty" — otherwise an
-    // all-off-list cache would serve a valid-but-itemless feed instead of a retryable 503.
-    if (!stories.some((s) => s.onList !== false)) {
+    const sort = sortParam(url.searchParams.get("sort"));
+    // Warm-up = "no servable stories yet" rather than "cache literally empty". The points
+    // view serves on-list stories only, so it's cold until something is on the list; the
+    // rolling date view can serve anything cached. Either way, return a retryable 503 rather
+    // than a valid-but-itemless feed while the first batch of summaries is still generating.
+    const warming =
+      sort === "points"
+        ? !stories.some((s) => s.onList !== false)
+        : stories.length === 0;
+    if (warming) {
       res.writeHead(503, {
         "content-type": "text/plain; charset=utf-8",
         "retry-after": "60",
@@ -152,6 +168,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const xml = buildFeedXml(stories, {
       count,
       minPoints,
+      sort,
       updatedAt: cache.updatedAt,
     });
     res.writeHead(200, {

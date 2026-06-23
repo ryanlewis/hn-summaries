@@ -102,6 +102,20 @@ export const FEED_PATH = "/feed";
 export const FEED_URL = `${PUBLIC_ORIGIN}${FEED_PATH}`;
 export const REPO_URL = "https://github.com/ryanlewis/hn-summaries";
 
+// Feed ordering, switchable via ?sort=.
+//   "date"   — rolling stream, newest summary first. Keeps stories that recently fell off
+//              the best list (until they're pruned at OFFLIST_RETENTION_MS), so the view
+//              keeps moving as new summaries land.
+//   "points" — the HN best-list ranking, on-list stories only. An entry vanishes the moment
+//              the story leaves the best list.
+// "date" is the default so a reader's view doesn't appear frozen on slow-moving top stories.
+export const FEED_SORTS = ["date", "points"] as const;
+export type FeedSort = (typeof FEED_SORTS)[number];
+export const DEFAULT_FEED_SORT: FeedSort = "date";
+// In the points view, a story is flagged "about to roll off" once its rank is within this
+// many places of the bottom of the best list (~200 long), so subscribers see it coming.
+export const ROLLOFF_WARN_BAND = 25;
+
 // --- Cache ---
 export const CACHE_PATH = fileURLToPath(
   new URL("../data/cache.json", import.meta.url),
