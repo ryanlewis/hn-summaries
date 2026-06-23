@@ -10,10 +10,11 @@ An AI-summarized RSS feed of [Hacker News's "best"](https://news.ycombinator.com
 
 | Param | Default | Notes |
 |---|---|---|
+| `?sort=date\|points` | `date` | `date` = newest summary first, a rolling stream that keeps stories up to 7 days after they leave the best list. `points` = the live HN best-list rank (on-list only); a story drops out the moment it leaves the list, and each item is labelled with its rank and flagged when near the bottom. |
 | `?count=N` | `30` | How many stories to include (max `200`). |
 | `?min_points=N` | `0` | Only include stories with at least N points. |
 
-Examples: [`/feed?count=10`](https://hn.rlew.io/feed?count=10), [`/feed?min_points=300`](https://hn.rlew.io/feed?min_points=300), `/feed?count=15&min_points=200`.
+Examples: [`/feed?sort=points`](https://hn.rlew.io/feed?sort=points), [`/feed?count=10`](https://hn.rlew.io/feed?count=10), [`/feed?min_points=300`](https://hn.rlew.io/feed?min_points=300), `/feed?sort=points&count=15&min_points=200`.
 
 ## How it works
 
@@ -39,8 +40,8 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 
 | Path | Description |
 |---|---|
-| `/feed` | RSS 2.0 feed (`?count`, `?min_points`). Also `/feed.xml`. |
-| `/` | HTML landing page: usage + latest 5 stories. |
+| `/feed` | RSS 2.0 feed (`?sort`, `?count`, `?min_points`). Also `/feed.xml`. |
+| `/` | HTML landing page: usage + latest 5 stories, with a Newest/Top-by-points toggle (`?sort`). |
 | `/healthz` | Liveness + cached story count. |
 | `/status` | Last refresh time + duration, next-refresh ETA, cache size, last error, and a fallback breakdown (count/percent + tally by reason). |
 
