@@ -27,7 +27,8 @@ Entry: `index.ts` → `startServer()` (serves at once), then `runRefresh()` once
 2. `pruneCache()` drops cached stories no longer on the list; ranks are updated on survivors (rank shifts without resummarizing).
 3. New ids (not already cached) are processed with `p-limit` concurrency (`CONCURRENCY_LIMIT`), capped at `MAX_NEW_PER_REFRESH` per cycle (cost backstop against a wiped-cache re-backfill; overflow defers to the next cycle).
 4. Per story (`processStory`): fetch item + top comments, extract article text via `extractArticleTextTiered` (fetch → browser-render fallback, or use self-post `text`, or fall back to title+discussion), summarize, build a `CachedStory`. The `fallbackReason` is persisted so `/status` can report the fallback rate + reason breakdown.
-5. `saveCache()` writes atomically (tmp file → rename).
+5. **Fallback-retry pass** (`retryFallback`, gated by `FALLBACK_RETRY_ENABLED`): cached on-list fallbacks are re-extracted in place (least-tried first, bounded by `MAX_FALLBACK_RETRIES` per story and `MAX_FALLBACK_RETRIES_PER_CYCLE` per cycle) and re-summarized if extraction now succeeds — self-healing for stories the browser tier can later render or that were transiently down. Recovered count surfaces in `/status`. (The normal path never re-summarizes cached ids, so this is the only way an existing fallback flips back to a real summary.)
+6. `saveCache()` writes atomically (tmp file → rename).
 
 A story that throws is left uncached and retried next cycle. A failed refresh leaves the cache untouched; an empty best list is treated as a transient error and skipped.
 
@@ -38,13 +39,18 @@ A story that throws is left uncached and retried next cycle. A failed refresh le
 - `hn.ts` — HN Firebase client. `fetchStory`/`fetchComment` return `null` for dead/deleted/non-story/error rather than throwing.
 - `extract.ts` — fetch + `@mozilla/readability` extraction with a HEAD pre-check, content-type filtering, and a hard byte cap (streamed). `htmlToArticleText` is the shared jsdom+Readability core (reused by the browser tier). `extractArticleTextTiered` is what the pipeline calls: it tries the fetch path, then — only on a *recoverable* failure (`error`/`empty`/`timeout`, not `non-html`/`too-large`) — falls back to the browser tier. Also exports `htmlToText` (used for comments and self-posts) backed by a single reused scratch jsdom document — safe because it's fully synchronous.
 - `extract-browser.ts` — the headless-browser fallback tier. Renders the page with `Bun.WebView` (Chrome/Chromium over CDP on Linux), grabs the rendered `outerHTML`, and feeds it back through `htmlToArticleText`. Runs under its own `BROWSER_CONCURRENCY` cap with a per-render timeout + settle delay; closes views in `finally` and `Bun.WebView.closeAll()` on shutdown. Minimal ambient types for it live in `src/bun-webview.d.ts` (we avoid full `@types/bun` to keep its DOM/fetch typings from colliding with the Node globals).
-- `summarize.ts` — exe.dev LLM gateway client (Anthropic Messages-compatible). Two prompt shapes: normal (article + HN-reaction sentence) and fallback (title + discussion only, prefixed "Article unavailable —"). Retries with exponential backoff; skips retry on deterministic 4xx except 429.
+- `summarize.ts` — summarization client with two selectable backends (see `SUMMARY_PROVIDER` below): the exe.dev ChatGPT/Codex proxy (OpenAI Responses API, streamed; default) and the exe.dev LLM gateway (Anthropic Messages API). Two prompt shapes: normal (article + HN-reaction sentence) and fallback (title + discussion only, prefixed "Article unavailable —"). Retries with exponential backoff; skips retry on deterministic 4xx except 429.
 - `feed.ts` / `page.ts` — pure renderers (RSS XML via the `feed` lib / landing HTML) from `CachedStory[]`. `html.ts` holds the shared pure-string helpers both use: escaping plus `selectStories` (count/minPoints filtering + rank ordering), `statsLine`, and `summaryHtml`.
 - `server.ts` — routes `/`, `/feed` (`?count=N` default 30 max 200, `?min_points=N`), `/healthz`, `/status` (refresh telemetry from `refreshState` plus a `fallbacks` breakdown — on-list count, fallback count/percent, and a tally by `fallbackReason`), and static favicons. `/feed` returns 503 until the first refresh populates the cache.
 
-## LLM gateway
+## Summarization backends
 
-Summaries go through the exe.dev LLM gateway at `http://169.254.169.254/gateway/llm/anthropic/v1/messages` (`LLM_ENDPOINT`). The VM is auto-authenticated by the gateway — **no API key is sent or needed.** Model is `claude-sonnet-4-6` (`LLM_MODEL`). Both are env-overridable. See `https://exe.dev/docs.md` for gateway details.
+Summaries go through one of two exe.dev proxies, selected by `SUMMARY_PROVIDER` (`config.ts`). Both auto-authenticate the VM — **no API key is sent or needed.**
+
+- `openai-responses` (**default**) — the exe.dev ChatGPT/Codex proxy, streaming Responses API, at `OPENAI_ENDPOINT` (`https://chatgpt.int.exe.xyz/v1/responses`), model `OPENAI_MODEL` (`gpt-5.5`). Draws on the ChatGPT subscription rather than the metered LLM token allowance.
+- `anthropic` — the exe.dev LLM gateway, Anthropic Messages API, at `LLM_ENDPOINT` (`https://llm.int.exe.xyz/v1/messages`), model `LLM_MODEL` (`claude-sonnet-4-6`). Metered against the token allowance.
+
+All endpoints/models are env-overridable. See `https://exe.dev/docs.md` for proxy details.
 
 ## Deployment
 

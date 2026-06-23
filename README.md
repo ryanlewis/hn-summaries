@@ -29,7 +29,9 @@ flowchart TD
     Cache --> Landing["/ (HTML landing)"]
 ```
 
-A single long-running Node process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary (pruned only after a retention window), so it isn't re-summarized when it bounces back.
+A single long-running Bun process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary (pruned only after a retention window), so it isn't re-summarized when it bounces back.
+
+Article text is extracted in tiers: a plain fetch + [Readability](https://github.com/mozilla/readability), then — only on a recoverable failure — a headless-browser render (Chromium via `Bun.WebView`) for JS-heavy pages, and finally a discussion-only fallback. Stories stuck on the fallback are re-extracted on later cycles (a bounded self-healing pass), so a page that was transiently down or needs JS recovers without a manual nudge.
 
 Summaries are generated through the exe.dev internal proxies, which authenticate the VM automatically — **no API key is stored anywhere**. Two backends are selectable via `SUMMARY_PROVIDER`: the [ChatGPT/Codex proxy](https://exe.dev/docs/integrations-github) (`gpt-5.5`, default — draws on the ChatGPT subscription rather than the metered token allowance) or the [LLM gateway](https://exe.dev/docs/shelley/llm-gateway) (`claude-sonnet-4-6`).
 
@@ -40,16 +42,16 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 | `/feed` | RSS 2.0 feed (`?count`, `?min_points`). Also `/feed.xml`. |
 | `/` | HTML landing page: usage + latest 5 stories. |
 | `/healthz` | Liveness + cached story count. |
-| `/status` | Last refresh time, next-refresh ETA, cache size, last error. |
+| `/status` | Last refresh time + duration, next-refresh ETA, cache size, last error, and a fallback breakdown (count/percent + tally by reason). |
 
 ## Running locally
 
-Requires Node 22+ (built on 24). Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services.
+Requires [Bun](https://bun.sh) ≥1.3.12 (pinned to 1.3.14 — `Bun.WebView` powers the browser extraction tier). Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary (set `BUN_CHROME_PATH` or put it on `$PATH`); disable it with `BROWSER_FALLBACK_ENABLED=false`.
 
 ```bash
-npm install
-npm start            # tsx index.ts — serves on :8000, runs the first refresh on boot
-npm run typecheck    # tsc --noEmit
+bun install
+bun start            # bun index.ts — serves on :8000, runs the first refresh on boot
+bun run typecheck    # tsc --noEmit
 ```
 
 The first boot summarizes the full best list (~200 stories, a few minutes); `/feed` returns `503` until the cache has entries. The cache persists to `data/cache.json` (gitignored), so restarts are instant.
@@ -71,18 +73,20 @@ Everything else — refresh interval, concurrency, article-size caps, per-refres
 ## Project layout
 
 ```
-index.ts            entrypoint: start server, refresh on boot, schedule hourly
-src/config.ts       all tunables
-src/hn.ts           Hacker News Firebase API client
-src/extract.ts      article fetch (content-type/size guards) + Readability; HTML→text
-src/summarize.ts    summarization backends (ChatGPT proxy + LLM gateway), prompts, retry
-src/cache.ts        JSON cache (in-memory singleton, atomic write, prune)
-src/refresh.ts      refresh pipeline (bounded concurrency)
-src/feed.ts         RSS 2.0 rendering
-src/page.ts         HTML landing page
-src/html.ts         shared rendering helpers (escaping, domain, stats)
-src/server.ts       node:http server + static favicon assets
-public/             favicons (orange "AI" mark)
+index.ts             entrypoint: start server, refresh on boot, schedule hourly
+src/config.ts        all checked-in tunables
+src/options.ts       local (gitignored) per-deployment options, e.g. <head> injection
+src/hn.ts            Hacker News Firebase API client
+src/extract.ts       article fetch (content-type/size guards) + Readability; HTML→text
+src/extract-browser.ts  headless-browser (Bun.WebView) extraction fallback tier
+src/summarize.ts     summarization backends (ChatGPT proxy + LLM gateway), prompts, retry
+src/cache.ts         JSON cache (in-memory singleton, atomic write, prune)
+src/refresh.ts       refresh pipeline (bounded concurrency, fallback-retry pass)
+src/feed.ts          RSS 2.0 rendering
+src/page.ts          HTML landing page
+src/html.ts          shared rendering helpers (escaping, domain, stats)
+src/server.ts        node:http server + static favicon assets
+public/              favicons (orange "AI" mark)
 hn-summaries.service systemd unit
 ```
 
