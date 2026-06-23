@@ -27,6 +27,7 @@ export interface RefreshState {
   lastRefreshAt: number; // Date.now() of last successful completion
   lastDurationMs: number;
   lastNewCount: number;
+  lastRecoveredCount: number; // fallbacks re-summarized successfully by the retry pass
   lastError: string | null;
   totalRefreshes: number;
 }
@@ -36,6 +37,7 @@ export const refreshState: RefreshState = {
   lastRefreshAt: 0,
   lastDurationMs: 0,
   lastNewCount: 0,
+  lastRecoveredCount: 0,
   lastError: null,
   totalRefreshes: 0,
 };
@@ -122,9 +124,13 @@ async function retryFallback(story: CachedStory): Promise<boolean> {
   }
 
   // Extraction succeeded this time — re-summarize against the real article. Refresh the
-  // item to pick up current comments/score too.
+  // item first to pick up current comments/score. If HN no longer serves it (deleted/dead
+  // or a transient error), don't pay for a re-summarize or promote a stale entry out of
+  // fallback — leave it as-is; a later cycle retries, or it ages off the list and is pruned.
   const fresh = await fetchStory(story.id);
-  const commentsText = await gatherComments(fresh?.kids);
+  if (!fresh) return false;
+
+  const commentsText = await gatherComments(fresh.kids);
   const summary = await summarize({
     title: story.title,
     url: story.url,
@@ -135,10 +141,8 @@ async function retryFallback(story: CachedStory): Promise<boolean> {
   story.isFallback = false;
   story.fallbackReason = undefined;
   story.generatedAt = Date.now();
-  if (fresh) {
-    story.score = fresh.score ?? story.score;
-    story.descendants = fresh.descendants ?? story.descendants;
-  }
+  story.score = fresh.score ?? story.score;
+  story.descendants = fresh.descendants ?? story.descendants;
   return true;
 }
 
@@ -151,10 +155,17 @@ export async function runRefresh(): Promise<void> {
   refreshState.running = true;
   const started = Date.now();
   try {
-    const cache = await loadCache();
+    // Work on a private clone of the in-memory cache. The HTTP server reads the live
+    // singleton on every request, so mutating it in place would let /feed and / observe a
+    // half-updated cycle (some ranks bumped, others not; prunes/new entries appearing one
+    // at a time). saveCache() swaps this clone in as the new singleton atomically at the end.
+    const cache = structuredClone(await loadCache());
     const bestIds = await fetchBestIds();
     if (bestIds.length === 0) {
       console.warn("[refresh] best list empty — leaving cache untouched");
+      // Surface this in /status: lastRefreshAt stays at the last *successful* cycle, so
+      // without this an operator can't tell "refreshing fine" from "repeatedly empty".
+      refreshState.lastError = "best list empty — cycle skipped (transient)";
       return;
     }
     const now = Date.now();
@@ -218,6 +229,7 @@ export async function runRefresh(): Promise<void> {
     // tier (and recovered sites) can backfill stories already in the cache, which the
     // normal path never re-summarizes. Least-tried first so every fallback gets a fair
     // first attempt before any is retried again.
+    let recoveredFallbacks = 0;
     if (FALLBACK_RETRY_ENABLED) {
       const retryable = Object.values(cache.stories)
         .filter(
@@ -237,13 +249,12 @@ export async function runRefresh(): Promise<void> {
         .slice(0, MAX_FALLBACK_RETRIES_PER_CYCLE);
 
       if (retryable.length > 0) {
-        let recovered = 0;
         await Promise.all(
           retryable.map((story) =>
             limit(async () => {
               try {
                 if (await retryFallback(story)) {
-                  recovered++;
+                  recoveredFallbacks++;
                   console.log(
                     `[refresh] recovered fallback #${story.id} ${story.title.slice(0, 70)}`,
                   );
@@ -258,7 +269,7 @@ export async function runRefresh(): Promise<void> {
           ),
         );
         console.log(
-          `[refresh] fallback retry: ${recovered}/${retryable.length} recovered`,
+          `[refresh] fallback retry: ${recoveredFallbacks}/${retryable.length} recovered`,
         );
       }
     }
@@ -267,6 +278,7 @@ export async function runRefresh(): Promise<void> {
     await saveCache(cache);
 
     refreshState.lastNewCount = results.filter(Boolean).length;
+    refreshState.lastRecoveredCount = recoveredFallbacks;
     refreshState.lastRefreshAt = Date.now();
     refreshState.lastError = null;
     refreshState.totalRefreshes++;

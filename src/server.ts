@@ -105,6 +105,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         : null,
       lastRefreshDurationMs: refreshState.lastDurationMs,
       lastNewSummaries: refreshState.lastNewCount,
+      lastRecoveredFallbacks: refreshState.lastRecoveredCount,
       totalRefreshes: refreshState.totalRefreshes,
       refreshRunning: refreshState.running,
       nextRefreshInSeconds: nextIn,
@@ -127,7 +128,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   if (url.pathname === "/feed" || url.pathname === "/feed.xml") {
-    if (stories.length === 0) {
+    // The feed is built from on-list stories only (selectStories filters off-list out), so
+    // warm-up is "no servable stories yet", not "cache literally empty" — otherwise an
+    // all-off-list cache would serve a valid-but-itemless feed instead of a retryable 503.
+    if (!stories.some((s) => s.onList !== false)) {
       res.writeHead(503, {
         "content-type": "text/plain; charset=utf-8",
         "retry-after": "60",

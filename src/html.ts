@@ -11,13 +11,10 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-export function escapeAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// Attribute values use the same escaping as text. escapeHtml is a strict superset of what
+// an attribute needs (it also escapes the single quote), so delegate rather than maintain a
+// parallel implementation that could drift and leave an attribute-context escaping gap.
+export const escapeAttr = escapeHtml;
 
 /** Split a summary on blank lines and wrap each block in an escaped <p>. */
 export function summaryHtml(summary: string): string {

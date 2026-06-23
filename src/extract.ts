@@ -57,9 +57,10 @@ export async function extractArticleText(
     if (head.ok) {
       const ct = head.headers.get("content-type") ?? "";
       if (ct && isBlockedContentType(ct)) return { ok: false, reason: "non-html" };
-      const cl = head.headers.get("content-length");
-      if (cl && Number(cl) > ARTICLE_MAX_BYTES)
-        return { ok: false, reason: "too-large" };
+      // No content-length / too-large rejection here. The GET path below streams with
+      // a hard byte cap and extracts the (partial) HTML, so a large-but-readable article
+      // is still summarized rather than forced to a discussion-only fallback — which the
+      // browser tier couldn't recover either, since "too-large" isn't browser-recoverable.
     }
   } catch {
     /* ignore — fall through to GET */
@@ -86,26 +87,29 @@ export async function extractArticleText(
   // If a content-type is present and it's clearly not HTML, bail to fallback.
   if (ct && !isHtmlContentType(ct)) return { ok: false, reason: "non-html" };
 
-  // Stream the body with a hard byte cap so a giant page can't OOM us.
+  // Stream the body with a hard byte cap so a giant page can't OOM us. Decode
+  // incrementally with a streaming TextDecoder so a multibyte UTF-8 codepoint split
+  // across a chunk boundary (or at the cap) isn't mangled into a replacement char.
   let html: string;
   try {
     const reader = res.body?.getReader();
     if (!reader) return { ok: false, reason: "error" };
-    const chunks: Uint8Array[] = [];
+    const decoder = new TextDecoder("utf-8");
+    html = "";
     let total = 0;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (value) {
-        chunks.push(value);
         total += value.byteLength;
+        html += decoder.decode(value, { stream: true });
         if (total > ARTICLE_MAX_BYTES) {
           await reader.cancel().catch(() => {});
           break; // Readability copes with partial HTML
         }
       }
     }
-    html = Buffer.concat(chunks).toString("utf8");
+    html += decoder.decode(); // flush any bytes still buffered in the decoder
   } catch (e) {
     const name = e instanceof Error ? e.name : "";
     return { ok: false, reason: name === "TimeoutError" ? "timeout" : "error" };
@@ -143,8 +147,7 @@ export function htmlToArticleText(html: string, url: string): ExtractionResult {
  * Tiered extraction: try the plain fetch+Readability path first; if it fails with a
  * reason a real browser can plausibly recover (see BROWSER_RECOVERABLE_REASONS), render
  * the page with Bun.WebView and re-run Readability. Returns the fetch result unchanged
- * when the browser tier is disabled, not applicable, or also fails — in the last case the
- * reason is annotated so /status can tell "fetch failed" from "browser also failed".
+ * when the browser tier is disabled, not applicable, or also fails.
  */
 export async function extractArticleTextTiered(
   url: string,
@@ -163,11 +166,10 @@ export async function extractArticleTextTiered(
   const rendered = await extractArticleViaBrowser(url);
   if (rendered.ok) return rendered;
 
-  // Both tiers failed — keep the fetch-path reason but mark the browser also failed.
-  return {
-    ok: false,
-    reason: `${fetched.reason} (browser also failed)` as ExtractFailReason,
-  };
+  // Both tiers failed — return the original fetch-path reason unchanged. It must stay one
+  // of the ExtractFailReason literals: it's persisted as fallbackReason, tallied in
+  // /status's byReason breakdown, and interpolated into the fallback summarization prompt.
+  return fetched;
 }
 
 // --- HTML → plain text (HN comment & self-post bodies) ---

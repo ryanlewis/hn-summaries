@@ -166,7 +166,10 @@ export function buildLandingPage(
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
-${options.extraHeadHtml ?? ""}
+${/* Deliberately raw, UNescaped: operator-controlled <head> HTML (analytics tag, site
+     verification). Trust boundary is the local options file / EXTRA_HEAD_HTML env — never
+     populate either from untrusted input, as the value executes on every page view. */
+""}${options.extraHeadHtml ?? ""}
 </head>
 <body>
 <div class="wrap">
