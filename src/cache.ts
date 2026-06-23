@@ -81,6 +81,31 @@ export function pruneStale(cache: CacheFile, now: number): number {
   return removed;
 }
 
+/**
+ * Hard size backstop. On-list stories are always kept (the live working set + the
+ * points feed); when the cache still exceeds `max`, evict off-list stories
+ * oldest-summary-first until under the cap. The feed serves at most MAX_FEED_COUNT
+ * stories ordered by summary time, so dropping the oldest-summary off-list entries
+ * never removes anything a feed could surface (mirrors html.summaryTime).
+ */
+export function capCache(cache: CacheFile, max: number): number {
+  const keys = Object.keys(cache.stories);
+  if (keys.length <= max) return 0;
+  const summaryTime = (s: CachedStory) => s.generatedAt || s.time * 1000;
+  const offListOldestFirst = keys
+    .filter((k) => cache.stories[k]!.onList === false)
+    .sort((a, b) => summaryTime(cache.stories[a]!) - summaryTime(cache.stories[b]!));
+  let size = keys.length;
+  let evicted = 0;
+  for (const key of offListOldestFirst) {
+    if (size <= max) break;
+    delete cache.stories[key];
+    size--;
+    evicted++;
+  }
+  return evicted;
+}
+
 export function getStories(cache: CacheFile): CachedStory[] {
   return Object.values(cache.stories);
 }

@@ -10,7 +10,7 @@ An AI-summarized RSS feed of [Hacker News's "best"](https://news.ycombinator.com
 
 | Param | Default | Notes |
 |---|---|---|
-| `?sort=date\|points` | `date` | `date` = newest summary first, a rolling stream that keeps stories up to 7 days after they leave the best list. `points` = the live HN best-list rank (on-list only); a story drops out the moment it leaves the list, and each item is labelled with its rank and flagged when near the bottom. |
+| `?sort=date\|points` | `date` | `date` = newest summary first, a rolling stream that keeps stories for a few days after they leave the best list. `points` = the live HN best-list rank (on-list only); a story drops out the moment it leaves the list, and each item is labelled with its rank and flagged when near the bottom. |
 | `?count=N` | `30` | How many stories to include (max `200`). |
 | `?min_points=N` | `0` | Only include stories with at least N points. |
 
@@ -30,7 +30,7 @@ flowchart TD
     Cache --> Landing["/ (HTML landing)"]
 ```
 
-A single long-running Bun process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary (pruned only after a retention window), so it isn't re-summarized when it bounces back.
+A single long-running Bun process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary, so it isn't re-summarized when it bounces back; it's dropped once it's been off the list past the retention window (`OFFLIST_RETENTION_MS`). A hard ceiling (`MAX_CACHE_STORIES`) caps total cache size as a backstop — on-list stories are never evicted, the oldest off-list summaries go first.
 
 Article text is extracted in tiers: a plain fetch + [Readability](https://github.com/mozilla/readability), then — only on a recoverable failure — a headless-browser render (Chromium via `Bun.WebView`) for JS-heavy pages, and finally a discussion-only fallback. Stories stuck on the fallback are re-extracted on later cycles (a bounded self-healing pass), so a page that was transiently down or needs JS recovers without a manual nudge.
 
@@ -43,7 +43,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 | `/feed` | RSS 2.0 feed (`?sort`, `?count`, `?min_points`). Also `/feed.xml`. |
 | `/` | HTML landing page: usage + latest 5 stories, with a Newest/Top-by-points toggle (`?sort`). |
 | `/healthz` | Liveness + cached story count. |
-| `/status` | Last refresh time + duration, next-refresh ETA, cache size, last error, and a fallback breakdown (count/percent + tally by reason). |
+| `/status` | Last refresh time + duration, next-refresh ETA, cache size (total / on-list / off-list / cap), last prune + eviction counts, last error, and a fallback breakdown (count/percent + tally by reason). |
 
 ## Running locally
 
@@ -69,7 +69,7 @@ Environment variables:
 | `OPENAI_ENDPOINT` / `OPENAI_MODEL` | ChatGPT proxy · `gpt-5.5` | Used when provider is `openai-responses`. |
 | `LLM_ENDPOINT` / `LLM_MODEL` | LLM gateway · `claude-sonnet-4-6` | Used when provider is `anthropic`. |
 
-Everything else — refresh interval, concurrency, article-size caps, per-refresh cost cap, off-list retention, comment count — lives in [`src/config.ts`](src/config.ts).
+Everything else — refresh interval, concurrency, article-size caps, per-refresh cost cap, off-list retention, cache size cap, comment count — lives in [`src/config.ts`](src/config.ts).
 
 ## Project layout
 

@@ -7,6 +7,7 @@ import {
   DEFAULT_FEED_SORT,
   FEED_SORTS,
   type FeedSort,
+  MAX_CACHE_STORIES,
   MAX_FEED_COUNT,
   PORT,
   REFRESH_INTERVAL_MS,
@@ -109,12 +110,20 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       status: "ok",
       uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
       cachedStories: stories.length,
+      cache: {
+        total: stories.length,
+        onList: onList.length,
+        offList: stories.length - onList.length,
+        cap: MAX_CACHE_STORIES,
+      },
       lastRefreshAt: refreshState.lastRefreshAt
         ? new Date(refreshState.lastRefreshAt).toISOString()
         : null,
       lastRefreshDurationMs: refreshState.lastDurationMs,
       lastNewSummaries: refreshState.lastNewCount,
       lastRecoveredFallbacks: refreshState.lastRecoveredCount,
+      lastPruned: refreshState.lastPruned,
+      lastEvicted: refreshState.lastEvicted,
       totalRefreshes: refreshState.totalRefreshes,
       refreshRunning: refreshState.running,
       nextRefreshInSeconds: nextIn,

@@ -124,5 +124,13 @@ export const CACHE_TMP_PATH = CACHE_PATH + ".tmp";
 export const CACHE_VERSION = 1 as const;
 // Keep summaries for stories that temporarily fall off the best list, so a story
 // that bounces off and back isn't re-summarized. Off-list entries are pruned only
-// once they've been gone this long (the best list's bottom churns hourly).
-export const OFFLIST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+// once they've been gone this long (the best list's bottom churns hourly). Bounce-backs
+// resolve within hours, so a few days is ample; the feed only ever serves the freshest
+// MAX_FEED_COUNT anyway, so a longer tail is just unservable weight.
+export const OFFLIST_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+// Hard ceiling on total cached stories — a *size* backstop beneath the time-based prune,
+// so the cache can't balloon if churn spikes or the best list grows. On-list stories are
+// always kept (the live working set + the points feed); when still over cap, off-list
+// stories are evicted oldest-summary-first. Sized as on-list (~200) + a rolling off-list
+// tail, kept just above MAX_FEED_COUNT so a full-depth date feed stays servable.
+export const MAX_CACHE_STORIES = 250;

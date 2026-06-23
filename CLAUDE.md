@@ -24,11 +24,11 @@ Entry: `index.ts` → `startServer()` (serves at once), then `runRefresh()` once
 
 **Refresh pipeline** (`src/refresh.ts`, the orchestrator):
 1. `fetchBestIds()` — the ranked ~200 "best" ids from HN's Firebase API.
-2. `pruneCache()` drops cached stories no longer on the list; ranks are updated on survivors (rank shifts without resummarizing).
+2. Each cached story is marked on/off the current best list; on-list survivors get a fresh `rank` + `lastSeenAt` (rank shifts without resummarizing). `pruneStale()` then drops only stories that have been **off** the list longer than `OFFLIST_RETENTION_MS`, so a story that briefly drops off keeps its summary and isn't re-summarized when it bounces back.
 3. New ids (not already cached) are processed with `p-limit` concurrency (`CONCURRENCY_LIMIT`), capped at `MAX_NEW_PER_REFRESH` per cycle (cost backstop against a wiped-cache re-backfill; overflow defers to the next cycle).
 4. Per story (`processStory`): fetch item + top comments, extract article text via `extractArticleTextTiered` (fetch → browser-render fallback, or use self-post `text`, or fall back to title+discussion), summarize, build a `CachedStory`. The `fallbackReason` is persisted so `/status` can report the fallback rate + reason breakdown.
 5. **Fallback-retry pass** (`retryFallback`, gated by `FALLBACK_RETRY_ENABLED`): cached on-list fallbacks are re-extracted in place (least-tried first, bounded by `MAX_FALLBACK_RETRIES` per story and `MAX_FALLBACK_RETRIES_PER_CYCLE` per cycle) and re-summarized if extraction now succeeds — self-healing for stories the browser tier can later render or that were transiently down. Recovered count surfaces in `/status`. (The normal path never re-summarizes cached ids, so this is the only way an existing fallback flips back to a real summary.)
-6. `saveCache()` writes atomically (tmp file → rename).
+6. `capCache()` enforces the `MAX_CACHE_STORIES` hard ceiling after all additions — on-list stories are never evicted; while still over cap, off-list stories are dropped oldest-summary-first. Then `saveCache()` writes atomically (tmp file → rename).
 
 A story that throws is left uncached and retried next cycle. A failed refresh leaves the cache untouched; an empty best list is treated as a transient error and skipped.
 
@@ -68,3 +68,5 @@ sudo systemctl restart hn-summaries    # after pulling changes
 ## Cache & data
 
 `data/cache.json` (gitignored) is the entire persistent state — survives restarts; summaries are never regenerated for ids already cached. Deleting it forces a full re-summarize on next refresh (subject to `MAX_NEW_PER_REFRESH` per cycle, so the backfill spreads over hours).
+
+Size is bounded two ways, both in `config.ts`: `pruneStale()` drops off-list entries past `OFFLIST_RETENTION_MS` (time bound), and `capCache()` enforces `MAX_CACHE_STORIES` (hard size bound, on-list never evicted). Steady state ≈ the on-list set (~200) plus a short off-list rolling tail. `/status` surfaces the split (`cache.{total,onList,offList,cap}`) plus `lastPruned`/`lastEvicted` so growth is observable.

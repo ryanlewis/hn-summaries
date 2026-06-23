@@ -6,12 +6,14 @@ import {
   COMMENT_MAX_CHARS,
   CONCURRENCY_LIMIT,
   FALLBACK_RETRY_ENABLED,
+  MAX_CACHE_STORIES,
   MAX_FALLBACK_RETRIES,
   MAX_FALLBACK_RETRIES_PER_CYCLE,
   MAX_NEW_PER_REFRESH,
   SELFPOST_TEXT_MAX_CHARS,
 } from "./config.js";
 import {
+  capCache,
   getStories,
   loadCache,
   pruneStale,
@@ -28,6 +30,8 @@ export interface RefreshState {
   lastDurationMs: number;
   lastNewCount: number;
   lastRecoveredCount: number; // fallbacks re-summarized successfully by the retry pass
+  lastPruned: number; // off-list stories dropped past the retention window
+  lastEvicted: number; // off-list stories dropped by the size cap
   lastError: string | null;
   totalRefreshes: number;
 }
@@ -38,6 +42,8 @@ export const refreshState: RefreshState = {
   lastDurationMs: 0,
   lastNewCount: 0,
   lastRecoveredCount: 0,
+  lastPruned: 0,
+  lastEvicted: 0,
   lastError: null,
   totalRefreshes: 0,
 };
@@ -274,11 +280,22 @@ export async function runRefresh(): Promise<void> {
       }
     }
 
+    // Size backstop: enforce the hard ceiling after all additions, evicting the
+    // oldest off-list summaries first (on-list stories are never evicted).
+    const evicted = capCache(cache, MAX_CACHE_STORIES);
+    if (evicted > 0) {
+      console.log(
+        `[refresh] size cap: evicted ${evicted}; cache ${Object.keys(cache.stories).length}/${MAX_CACHE_STORIES}`,
+      );
+    }
+
     cache.updatedAt = Date.now();
     await saveCache(cache);
 
     refreshState.lastNewCount = results.filter(Boolean).length;
     refreshState.lastRecoveredCount = recoveredFallbacks;
+    refreshState.lastPruned = removed;
+    refreshState.lastEvicted = evicted;
     refreshState.lastRefreshAt = Date.now();
     refreshState.lastError = null;
     refreshState.totalRefreshes++;
