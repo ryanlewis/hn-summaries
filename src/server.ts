@@ -27,6 +27,7 @@ const STATIC_ASSETS: Record<string, { body: Buffer; type: string }> = (() => {
     ["/favicon.svg", "image/svg+xml"],
     ["/favicon-180.png", "image/png"],
     ["/favicon-32.png", "image/png"],
+    ["/og.png", "image/png"], // social-share card (Open Graph / Twitter)
   ];
   const map: Record<string, { body: Buffer; type: string }> = {};
   for (const [route, type] of files) {
@@ -70,6 +71,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   const cache = await loadCache();
   const stories = getStories(cache);
+
+  if (url.pathname === "/robots.txt") {
+    // Fully public feed — allow everything. (No sitemap: it's a single landing page.)
+    res.writeHead(200, {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "public, max-age=86400",
+    });
+    res.end("User-agent: *\nAllow: /\n");
+    return;
+  }
 
   if (url.pathname === "/healthz") {
     return sendJson(res, 200, {

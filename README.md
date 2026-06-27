@@ -44,6 +44,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 | `/` | HTML landing page: usage + latest 5 stories, with a Newest/Top-by-points toggle (`?sort`). |
 | `/healthz` | Liveness + cached story count. |
 | `/status` | Last refresh time + duration, next-refresh ETA, cache size (total / on-list / off-list / cap), last prune + eviction counts, last error, and a fallback breakdown (count/percent + tally by reason). |
+| `/robots.txt` | Allow-all (it's a public feed). |
 
 ## Running locally
 
@@ -84,10 +85,10 @@ src/summarize.ts     summarization backends (ChatGPT proxy + LLM gateway), promp
 src/cache.ts         JSON cache (in-memory singleton, atomic write, prune)
 src/refresh.ts       refresh pipeline (bounded concurrency, fallback-retry pass)
 src/feed.ts          RSS 2.0 rendering
-src/page.ts          HTML landing page
+src/page.ts          HTML landing page (+ OG/Twitter cards, RSS autodiscovery, canonical)
 src/html.ts          shared rendering helpers (escaping, domain, stats)
-src/server.ts        node:http server + static favicon assets
-public/              favicons (orange "AI" mark)
+src/server.ts        node:http server + static assets (favicons, og.png) + robots.txt
+public/              favicons + og.png social card (orange "AI" mark)
 hn-summaries.service systemd unit
 ```
 

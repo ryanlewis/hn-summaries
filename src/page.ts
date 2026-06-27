@@ -12,12 +12,25 @@ import {
   LLM_MODEL,
   MAX_FEED_COUNT,
   OPENAI_MODEL,
+  PUBLIC_ORIGIN,
   REPO_URL,
   SUMMARY_PROVIDER,
 } from "./config.js";
 import { options } from "./options.js";
 
 const SUMMARY_MODEL = SUMMARY_PROVIDER === "anthropic" ? LLM_MODEL : OPENAI_MODEL;
+
+// --- Static page metadata (title / description / social-share card) ---
+// Title is shared by <title>, og:title and twitter:title; description likewise. The
+// canonical URL is the bare origin so the ?sort= variants don't read as duplicate pages,
+// and the OG/Twitter image is the committed public/og.png (1200×630 @2x).
+const SITE_TITLE = "Hacker News Best — AI Summarized";
+const SITE_DESC =
+  "The Hacker News “best” list as an AI-summarized RSS feed — every story summarized from the article and the HN discussion, with links to both. Refreshed hourly.";
+const SITE_HOST = new URL(PUBLIC_ORIGIN).host;
+const CANONICAL_URL = `${PUBLIC_ORIGIN}/`;
+const OG_IMAGE_URL = `${PUBLIC_ORIGIN}/og.png`;
+const OG_IMAGE_ALT = "Hacker News Best, summarized — an RSS feed of AI summaries";
 import type { CachedStory } from "./cache.js";
 import {
   bestListSize,
@@ -77,10 +90,29 @@ export function buildLandingPage(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Hacker News Best — AI Summarized</title>
+<meta name="theme-color" content="#181512">
+<title>${escapeHtml(SITE_TITLE)}</title>
+<meta name="description" content="${escapeAttr(SITE_DESC)}">
+<link rel="canonical" href="${escapeAttr(CANONICAL_URL)}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/favicon-180.png">
+<link rel="alternate" type="application/rss+xml" title="${escapeAttr(SITE_TITLE)} (Newest)" href="${escapeAttr(FEED_URL)}">
+<link rel="alternate" type="application/rss+xml" title="${escapeAttr(SITE_TITLE)} (Top by points)" href="${escapeAttr(`${FEED_URL}?sort=points`)}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${escapeAttr(SITE_HOST)}">
+<meta property="og:title" content="${escapeAttr(SITE_TITLE)}">
+<meta property="og:description" content="${escapeAttr(SITE_DESC)}">
+<meta property="og:url" content="${escapeAttr(CANONICAL_URL)}">
+<meta property="og:image" content="${escapeAttr(OG_IMAGE_URL)}">
+<meta property="og:image:width" content="2400">
+<meta property="og:image:height" content="1260">
+<meta property="og:image:alt" content="${escapeAttr(OG_IMAGE_ALT)}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${escapeAttr(SITE_TITLE)}">
+<meta name="twitter:description" content="${escapeAttr(SITE_DESC)}">
+<meta name="twitter:image" content="${escapeAttr(OG_IMAGE_URL)}">
+<meta name="twitter:image:alt" content="${escapeAttr(OG_IMAGE_ALT)}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
