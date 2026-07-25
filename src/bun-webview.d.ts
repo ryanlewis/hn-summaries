@@ -7,7 +7,14 @@ export {};
 declare global {
   class BunWebView {
     constructor(options?: {
-      backend?: "webkit" | "chrome";
+      // The object form takes an explicit binary path. Prefer it over the "chrome"
+      // shorthand: the shorthand relies on Bun's own discovery, which consults
+      // BUN_CHROME_PATH from the *startup* environment and cannot see a runtime
+      // process.env assignment.
+      backend?:
+        | "webkit"
+        | "chrome"
+        | { type: "chrome"; path?: string; url?: string | false };
       url?: string;
       width?: number;
       height?: number;

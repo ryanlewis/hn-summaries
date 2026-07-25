@@ -65,14 +65,25 @@ function findChromeBinary(): string | null {
   return null;
 }
 
-// Resolve once at startup, log the outcome, and seed $BUN_CHROME_PATH so Bun.WebView's
-// own discovery uses the same binary. Warns (rather than throws) if the tier is enabled
-// but no browser exists — the pipeline still works, it just can't use this fallback.
+// Resolve once at startup and log the outcome. Warns (rather than throws) if the tier is
+// enabled but no browser exists — the pipeline still works, it just can't use this
+// fallback.
+//
+// The resolved path is kept here and passed explicitly to each WebView via
+// `backend: { type: "chrome", path }`. Setting process.env.BUN_CHROME_PATH is NOT enough:
+// Bun.WebView's native side reads that variable from the environment the process was
+// *started* with, so a runtime assignment is invisible to it. We used to only set the env
+// var, which meant Bun ignored the binary we'd carefully resolved, fell back to its own
+// discovery, and threw ERR_DLOPEN_FAILED ("Failed to spawn Chrome") on every single
+// render — while the startup log cheerfully reported the correct path. The env var is
+// still set, for any child process that wants it.
 let chromeResolved = false;
+let chromePath: string | null = null;
 export function ensureChromePath(): void {
   if (chromeResolved) return;
   chromeResolved = true;
   const bin = findChromeBinary();
+  chromePath = bin;
   if (bin) {
     process.env.BUN_CHROME_PATH = bin;
     console.log(`[extract-browser] using Chrome/Chromium: ${bin}`);
@@ -121,16 +132,25 @@ export function extractArticleViaBrowser(url: string): Promise<ExtractionResult>
       return { ok: false, reason: "error" }; // not running under a WebView-capable Bun
     }
     ensureChromePath();
+    if (!chromePath) return { ok: false, reason: "error" }; // no browser installed
     ensureShutdownHook();
 
-    const view = new Bun.WebView({
-      backend: "chrome",
-      width: BROWSER_VIEWPORT_WIDTH,
-      height: BROWSER_VIEWPORT_HEIGHT,
-      dataStore: "ephemeral",
-    });
+    let view: BunWebView | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      // Constructing the view spawns the browser process, and that throws if the browser
+      // won't start ("Failed to spawn Chrome"). It must be inside the try: a browser that
+      // can't launch means this *tier* can't help, which is a fallback reason like any
+      // other. Constructed outside, the throw escaped this catch entirely and propagated
+      // out through extractArticleTextTiered into processStory, failing the whole story —
+      // so a broken browser tier discarded stories the fetch tier had merely found
+      // recoverable, instead of letting them fall back to a discussion-only summary.
+      view = new Bun.WebView({
+        backend: { type: "chrome", path: chromePath },
+        width: BROWSER_VIEWPORT_WIDTH,
+        height: BROWSER_VIEWPORT_HEIGHT,
+        dataStore: "ephemeral",
+      });
       await Promise.race([
         view.navigate(url),
         new Promise<never>((_, reject) => {
@@ -151,7 +171,7 @@ export function extractArticleViaBrowser(url: string): Promise<ExtractionResult>
     } finally {
       if (timer) clearTimeout(timer);
       try {
-        view.close();
+        view?.close(); // undefined when construction itself failed
       } catch {
         /* ignore */
       }
