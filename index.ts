@@ -1,16 +1,23 @@
 // Entrypoint: start the HTTP server, run an initial refresh, then refresh hourly.
-import { REFRESH_INTERVAL_MS } from "./src/config.js";
+import { REFRESH_DISABLED, REFRESH_INTERVAL_MS } from "./src/config.js";
 import { ensureChromePath } from "./src/extract-browser.js";
 import { runRefresh } from "./src/refresh.js";
 import { startServer } from "./src/server.js";
 
 async function main(): Promise<void> {
+  // Serve immediately (returns 503 on /feed until the cache has stories).
+  startServer();
+
+  // Local dev: serve whatever's in the cache (typically a CACHE_PATH fixture) and skip
+  // the network pipeline entirely. No browser tier needed, so don't resolve Chrome either.
+  if (REFRESH_DISABLED) {
+    console.log("[main] REFRESH_DISABLED — serving the cache without refreshing");
+    return;
+  }
+
   // Resolve the browser binary up front so the chosen path (or its absence) is logged
   // at boot, not lazily on the first fallback render.
   ensureChromePath();
-
-  // Serve immediately (returns 503 on /feed until the first refresh populates the cache).
-  startServer();
 
   // Kick off the first refresh, then schedule subsequent ones.
   await runRefresh();

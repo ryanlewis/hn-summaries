@@ -61,10 +61,13 @@ Requires [Bun](https://bun.sh) ≥1.3.12 (pinned to 1.3.14 — `Bun.WebView` pow
 ```bash
 bun install
 bun start            # bun index.ts — serves on :8000, runs the first refresh on boot
+bun run dev          # offline dev: serve the fixture, skip refresh (no VM needed)
 bun run typecheck    # tsc --noEmit
 ```
 
 The first boot summarizes whichever best-list stories clear `MIN_POINTS_TO_SUMMARIZE` — around 25-30 of the ~200 at the default threshold, capped at `MAX_NEW_PER_REFRESH` (60) per cycle. `/feed` returns `503` until the cache has entries. The cache persists to `data/cache.json` (gitignored), so restarts are instant.
+
+**Working on the UI offline:** `bun run dev` serves a committed sample cache (`fixtures/cache.sample.json`) and skips the refresh loop, so the page and feed render instantly with no network and no summarization cost — handy since the real pipeline only runs on an exe.dev VM. It's `CACHE_PATH=fixtures/cache.sample.json REFRESH_DISABLED=1 bun index.ts`; both env vars are documented in [`src/config.ts`](src/config.ts).
 
 ### Configuration
 
@@ -97,6 +100,7 @@ src/page.ts          HTML landing page (+ OG/Twitter cards, RSS autodiscovery, c
 src/html.ts          shared rendering helpers (escaping, domain, stats)
 src/server.ts        node:http server + static assets (favicons, og.png) + robots.txt
 public/              favicons + og.png social card (orange "AI" mark)
+fixtures/            cache.sample.json — sample cache for offline `bun run dev`
 hn-summaries.service systemd unit
 ```
 

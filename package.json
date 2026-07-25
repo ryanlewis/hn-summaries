@@ -6,6 +6,7 @@
   "description": "Hacker News 'best' stories as an AI-summarized RSS feed (exe.dev LLM gateway)",
   "scripts": {
     "start": "bun index.ts",
+    "dev": "CACHE_PATH=fixtures/cache.sample.json REFRESH_DISABLED=1 bun index.ts",
     "typecheck": "tsc --noEmit",
     "install-browser": "bunx playwright install chromium"
   },

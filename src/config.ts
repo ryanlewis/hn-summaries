@@ -49,6 +49,11 @@ function intEnv(raw: string | undefined, fallback: number, min: number): number 
 
 // --- Refresh / pipeline ---
 export const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // hourly
+// Local dev switch: when set, index.ts serves the existing cache and skips the boot +
+// hourly refresh entirely — no HN fetch, no extraction, no summarization. Pair with a
+// CACHE_PATH fixture to work on the render layer fully offline. See `bun run dev`.
+export const REFRESH_DISABLED =
+  (process.env.REFRESH_DISABLED ?? "false") !== "false";
 export const CONCURRENCY_LIMIT = 5; // parallel fetch+summarize workers
 // Hard cap on how many NEW stories are summarized per refresh cycle. Steady-state
 // churn is well under this, so it never bites normally — it's a cost backstop so a
@@ -159,9 +164,12 @@ export const DEFAULT_FEED_SORT: FeedSort = "date";
 export const ROLLOFF_WARN_BAND = 25;
 
 // --- Cache ---
-export const CACHE_PATH = fileURLToPath(
-  new URL("../data/cache.json", import.meta.url),
-);
+// On-disk cache location. Overridable via CACHE_PATH so local dev can point at a
+// committed fixture (e.g. `fixtures/cache.sample.json`, resolved against the cwd)
+// instead of the live data/cache.json next to the source. See `bun run dev`.
+export const CACHE_PATH =
+  process.env.CACHE_PATH ??
+  fileURLToPath(new URL("../data/cache.json", import.meta.url));
 export const CACHE_TMP_PATH = CACHE_PATH + ".tmp";
 export const CACHE_VERSION = 1 as const;
 // Keep summaries for stories that temporarily fall off the best list, so a story

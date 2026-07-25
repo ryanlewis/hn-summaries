@@ -10,9 +10,11 @@ A Bun/TypeScript service that turns the Hacker News "best" list into an AI-summa
 
 ```bash
 bun start          # run the server (bun index.ts; no build step)
+bun run dev        # offline local dev: serve the fixture, no refresh (see below)
 bun run typecheck  # tsc --noEmit (the only "test"; run this before committing)
 ```
 
+- **Local dev without a VM:** `bun run dev` = `CACHE_PATH=fixtures/cache.sample.json REFRESH_DISABLED=1 bun index.ts`. It serves the committed fixture (`fixtures/cache.sample.json`, ~15 records hitting every render branch) and skips the boot + hourly refresh entirely — no HN fetch, no summarization, no Chrome. The point: iterate on `page.ts` / `feed.ts` / `html.ts` offline at zero cost (summarization only authenticates on an exe.dev VM, so the real pipeline can't run off-VM). `CACHE_PATH` (override the cache file; resolved against the cwd when relative) and `REFRESH_DISABLED` (skip the network pipeline, serve the cache only) both live in `config.ts`.
 - Runs on **Bun** (≥1.3.12, pinned to 1.3.14 — needed for `Bun.WebView`). Bun runs the TS directly; there is no `tsx`, no build, no bundler, no test runner.
 - There is no lint step. Type-checking is the gate.
 - `smoke.ts` is a throwaway one-shot that runs a single real HN story through the whole pipeline and writes `/tmp/smoke-{feed.xml,page.html}` (one gateway call, ~1¢). It's gitignored; recreate it ad hoc (`bun smoke.ts`) to eyeball pipeline output without touching the cache.
