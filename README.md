@@ -12,7 +12,7 @@ An AI-summarized RSS feed of [Hacker News's "best"](https://news.ycombinator.com
 |---|---|---|
 | `?sort=date\|points` | `date` | `date` = newest summary first, a rolling stream that keeps stories for a few days after they leave the best list. `points` = the live HN best-list rank (on-list only); a story drops out the moment it leaves the list, and each item is labelled with its rank and flagged when near the bottom. |
 | `?count=N` | `30` | How many stories to include (max `200`). |
-| `?min_points=N` | `0` | Only include stories with at least N points. |
+| `?min_points=N` | `0` | Only include stories with at least N points. Scores are refreshed every cycle, so this filters on a story's current standing, not its standing when it was summarized. |
 
 Examples: [`/feed?sort=points`](https://hn.rlew.io/feed?sort=points), [`/feed?count=10`](https://hn.rlew.io/feed?count=10), [`/feed?min_points=300`](https://hn.rlew.io/feed?min_points=300), `/feed?sort=points&count=15&min_points=200`.
 
@@ -20,17 +20,25 @@ Examples: [`/feed?sort=points`](https://hn.rlew.io/feed?sort=points), [`/feed?co
 
 ```mermaid
 flowchart TD
-    HN["HN Firebase API"] --> Fetch["fetch best IDs + stories + top comments"]
-    Fetch --> Extract["fetch &amp; extract article text<br/>(Readability/jsdom)"]
+    HN["HN Firebase API"] --> Sweep["fetch best IDs<br/>+ current metadata for all ~200"]
+    Sweep --> Scores["refresh score + comment count<br/>on cached stories"]
+    Sweep --> Gate{"new story<br/>≥ MIN_POINTS_TO_SUMMARIZE?"}
+    Gate -->|"no"| Skip["skip — reconsidered next cycle"]
+    Gate -->|"yes"| Extract["fetch &amp; extract article text<br/>(Readability/jsdom)"]
     Extract -->|"non-HTML / paywall / no URL"| Fallback["fall back to the discussion"]
     Extract --> Summarize["summarize<br/>(exe.dev ChatGPT/Codex proxy — gpt-5.5)"]
     Fallback --> Summarize
     Summarize --> Cache["JSON cache<br/>(data/cache.json)"]
+    Scores --> Cache
     Cache --> Feed["/feed (RSS 2.0)"]
     Cache --> Landing["/ (HTML landing)"]
 ```
 
-A single long-running Bun process refreshes the best list **hourly**, summarizing only stories it hasn't seen before, and serves the feed from an in-memory + on-disk cache. A story that temporarily drops off the best list keeps its summary, so it isn't re-summarized when it bounces back; it's dropped once it's been off the list past the retention window (`OFFLIST_RETENTION_MS`). A hard ceiling (`MAX_CACHE_STORIES`) caps total cache size as a backstop — on-list stories are never evicted, the oldest off-list summaries go first.
+A single long-running Bun process refreshes the best list **hourly** and serves the feed from an in-memory + on-disk cache.
+
+Each cycle starts with one metadata sweep over the whole best list, which does two jobs. It **refreshes the score and comment count** on stories already cached — a story is summarized as it *enters* the list, so without this it would keep its entry-day figures forever and `?min_points` would filter on a stale number. And it **gates what gets summarized**: only stories that have reached `MIN_POINTS_TO_SUMMARIZE` (default `300`) are worth the LLM call. Anything below is left uncached and reconsidered next cycle, so it's picked up the moment it crosses — by which point its discussion has enough substance to summarize. Set the threshold to `0` to summarize everything that touches the list (~100/day); the default admits ~13/day.
+
+A story that temporarily drops off the best list keeps its summary, so it isn't re-summarized when it bounces back; it's dropped once it's been off the list past the retention window (`OFFLIST_RETENTION_MS`). A hard ceiling (`MAX_CACHE_STORIES`) caps total cache size as a backstop — on-list stories are never evicted, the oldest off-list summaries go first.
 
 Article text is extracted in tiers: a plain fetch + [Readability](https://github.com/mozilla/readability), then — only on a recoverable failure — a headless-browser render (Chromium via `Bun.WebView`) for JS-heavy pages, and finally a discussion-only fallback. Stories stuck on the fallback are re-extracted on later cycles (a bounded self-healing pass), so a page that was transiently down or needs JS recovers without a manual nudge.
 
@@ -43,7 +51,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 | `/feed` | RSS 2.0 feed (`?sort`, `?count`, `?min_points`). Also `/feed.xml`. |
 | `/` | HTML landing page: usage + latest 5 stories, with a Newest/Top-by-points toggle (`?sort`). |
 | `/healthz` | Liveness + cached story count. |
-| `/status` | Last refresh time + duration, next-refresh ETA, cache size (total / on-list / off-list / cap), last prune + eviction counts, last error, and a fallback breakdown (count/percent + tally by reason). |
+| `/status` | Last refresh time + duration, next-refresh ETA, cache size (total / on-list / off-list / cap), last prune + eviction counts, how many scores moved and how many stories were held back below the points gate, last error, and a fallback breakdown (count/percent + tally by reason). |
 | `/robots.txt` | Allow-all (it's a public feed). |
 
 ## Running locally

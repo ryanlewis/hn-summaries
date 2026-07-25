@@ -10,6 +10,8 @@ import {
   MAX_FALLBACK_RETRIES,
   MAX_FALLBACK_RETRIES_PER_CYCLE,
   MAX_NEW_PER_REFRESH,
+  METADATA_CONCURRENCY,
+  MIN_POINTS_TO_SUMMARIZE,
   SELFPOST_TEXT_MAX_CHARS,
 } from "./config.js";
 import {
@@ -21,7 +23,7 @@ import {
   type CachedStory,
 } from "./cache.js";
 import { extractArticleTextTiered, htmlToText } from "./extract.js";
-import { fetchBestIds, fetchComment, fetchStory } from "./hn.js";
+import { fetchBestIds, fetchComment, fetchStory, type HNStory } from "./hn.js";
 import { summarize } from "./summarize.js";
 
 export interface RefreshState {
@@ -32,6 +34,9 @@ export interface RefreshState {
   lastRecoveredCount: number; // fallbacks re-summarized successfully by the retry pass
   lastPruned: number; // off-list stories dropped past the retention window
   lastEvicted: number; // off-list stories dropped by the size cap
+  lastScoreUpdates: number; // cached on-list stories whose score/comments moved this cycle
+  lastGatedByPoints: number; // new stories held back below MIN_POINTS_TO_SUMMARIZE
+  lastMetadataMisses: number; // best-list ids HN wouldn't serve during the sweep
   lastError: string | null;
   totalRefreshes: number;
 }
@@ -44,6 +49,9 @@ export const refreshState: RefreshState = {
   lastRecoveredCount: 0,
   lastPruned: 0,
   lastEvicted: 0,
+  lastScoreUpdates: 0,
+  lastGatedByPoints: 0,
+  lastMetadataMisses: 0,
   lastError: null,
   totalRefreshes: 0,
 };
@@ -62,11 +70,35 @@ async function gatherComments(kids: number[] | undefined): Promise<string> {
     .join("\n");
 }
 
+/**
+ * Fetch current metadata for every id on the best list, with bounded concurrency.
+ * One sweep serves both jobs a cycle needs it for: refreshing score/comment counts on
+ * already-cached stories, and deciding which new stories clear MIN_POINTS_TO_SUMMARIZE.
+ * Ids HN won't serve (dead/deleted/transient error) are simply absent from the map —
+ * callers treat a miss as "no information", never as zero.
+ */
+async function fetchBestMetadata(ids: number[]): Promise<Map<number, HNStory>> {
+  const limit = pLimit(METADATA_CONCURRENCY);
+  const live = new Map<number, HNStory>();
+  await Promise.all(
+    ids.map((id) =>
+      limit(async () => {
+        const story = await fetchStory(id);
+        if (story) live.set(id, story);
+      }),
+    ),
+  );
+  return live;
+}
+
 async function processStory(
   id: number,
   rank: number,
+  prefetched?: HNStory,
 ): Promise<CachedStory | null> {
-  const story = await fetchStory(id);
+  // The cycle's metadata sweep already fetched this story; reuse it rather than
+  // paying for a second identical GET.
+  const story = prefetched ?? (await fetchStory(id));
   if (!story) return null;
 
   const commentsText = await gatherComments(story.kids);
@@ -179,27 +211,65 @@ export async function runRefresh(): Promise<void> {
     const rankOf = new Map<number, number>();
     bestIds.forEach((id, i) => rankOf.set(id, i));
 
+    // One metadata sweep for the whole list, reused below for both the score refresh
+    // and the points gate.
+    const live = await fetchBestMetadata(bestIds);
+    const metadataMisses = bestIds.length - live.size;
+
     // Mark every cached story on/off the current best list. On-list stories get a
     // fresh rank + lastSeenAt; off-list stories keep their summary (so a bounce-back
     // isn't re-summarized) and start/continue their retention clock.
+    //
+    // On-list stories also get their score + comment count refreshed. Without this they
+    // keep whatever they had at summarization time — which is the moment they were
+    // *weakest*, since a story is summarized as it enters the list. That stale number is
+    // what min_points filters on and what the feed prints, so a #1 story with 1600 points
+    // was being served as "209 points" forever.
+    let scoreUpdates = 0;
     for (const story of Object.values(cache.stories)) {
       const on = currentIds.has(story.id);
       story.onList = on;
       if (on) {
         story.rank = rankOf.get(story.id)!;
         story.lastSeenAt = now;
+        const fresh = live.get(story.id);
+        // A miss means HN didn't serve the item this cycle — keep the last known
+        // figures rather than zeroing a story out on a transient error.
+        if (fresh) {
+          const score = fresh.score ?? story.score;
+          const descendants = fresh.descendants ?? story.descendants;
+          if (score !== story.score || descendants !== story.descendants) {
+            scoreUpdates++;
+          }
+          story.score = score;
+          story.descendants = descendants;
+        }
       } else if (!story.lastSeenAt) {
         story.lastSeenAt = now;
       }
     }
 
-    const allNew = bestIds.filter((id) => !cache.stories[String(id)]);
+    // Only summarize stories that have proven themselves. A story below the threshold
+    // is left uncached and re-evaluated every cycle, so it's picked up the moment it
+    // crosses — by which point its discussion is worth summarizing too. Ids missing from
+    // the sweep are held back as well; they cost nothing to reconsider next cycle.
+    const uncached = bestIds.filter((id) => !cache.stories[String(id)]);
+    const allNew = uncached.filter(
+      (id) => (live.get(id)?.score ?? 0) >= MIN_POINTS_TO_SUMMARIZE,
+    );
+    const gatedByPoints = uncached.length - allNew.length;
     const toProcess = allNew.slice(0, MAX_NEW_PER_REFRESH);
     const deferred = allNew.length - toProcess.length;
     const removed = pruneStale(cache, now); // only stories off-list past the retention window
     console.log(
-      `[refresh] ${bestIds.length} best; ${toProcess.length} new to summarize${
+      `[refresh] ${bestIds.length} best; ${scoreUpdates} scores updated; ${toProcess.length} new to summarize${
         deferred > 0 ? ` (+${deferred} deferred to next cycle by cap)` : ""
+      }${
+        gatedByPoints > 0
+          ? `; ${gatedByPoints} below ${MIN_POINTS_TO_SUMMARIZE}pts`
+          : ""
+      }${
+        metadataMisses > 0 ? `; ${metadataMisses} metadata misses` : ""
       }; ${removed} pruned; cache ${Object.keys(cache.stories).length}`,
     );
 
@@ -209,7 +279,7 @@ export async function runRefresh(): Promise<void> {
       toProcess.map((id) =>
         limit(async () => {
           try {
-            const entry = await processStory(id, rankOf.get(id)!);
+            const entry = await processStory(id, rankOf.get(id)!, live.get(id));
             if (entry) {
               cache.stories[String(id)] = entry;
               done++;
@@ -296,6 +366,9 @@ export async function runRefresh(): Promise<void> {
     refreshState.lastRecoveredCount = recoveredFallbacks;
     refreshState.lastPruned = removed;
     refreshState.lastEvicted = evicted;
+    refreshState.lastScoreUpdates = scoreUpdates;
+    refreshState.lastGatedByPoints = gatedByPoints;
+    refreshState.lastMetadataMisses = metadataMisses;
     refreshState.lastRefreshAt = Date.now();
     refreshState.lastError = null;
     refreshState.totalRefreshes++;

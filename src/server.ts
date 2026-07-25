@@ -9,6 +9,7 @@ import {
   type FeedSort,
   MAX_CACHE_STORIES,
   MAX_FEED_COUNT,
+  MIN_POINTS_TO_SUMMARIZE,
   PORT,
   REFRESH_INTERVAL_MS,
 } from "./config.js";
@@ -135,6 +136,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       lastRecoveredFallbacks: refreshState.lastRecoveredCount,
       lastPruned: refreshState.lastPruned,
       lastEvicted: refreshState.lastEvicted,
+      lastScoreUpdates: refreshState.lastScoreUpdates,
+      lastGatedByPoints: refreshState.lastGatedByPoints,
+      lastMetadataMisses: refreshState.lastMetadataMisses,
+      minPointsToSummarize: MIN_POINTS_TO_SUMMARIZE,
       totalRefreshes: refreshState.totalRefreshes,
       refreshRunning: refreshState.running,
       nextRefreshInSeconds: nextIn,

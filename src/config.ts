@@ -36,6 +36,27 @@ export const CONCURRENCY_LIMIT = 5; // parallel fetch+summarize workers
 // wiped cache can't silently re-summarize the whole list in one hour. Excess
 // stories are picked up on subsequent refreshes.
 export const MAX_NEW_PER_REFRESH = 60;
+// Concurrency for the per-cycle metadata sweep over the best list. These are cheap
+// single-GET item reads (no extraction, no summarization), so they run wider than
+// CONCURRENCY_LIMIT — the whole ~200-story sweep should finish in a few seconds.
+export const METADATA_CONCURRENCY = Number(process.env.METADATA_CONCURRENCY ?? 12);
+// A story must reach this many points before it is summarized at all.
+//
+// Without a gate every story that so much as touches the best list gets summarized
+// (~100/day), and each one is summarized at its *weakest* moment — on entry, when the
+// discussion is a handful of comments. Waiting for a story to prove itself cuts both
+// the feed volume and the LLM spend, and means the discussion summary is written
+// against a mature thread.
+//
+// Measured against a live best list (~200 stories, median 59 points), roughly:
+//   0   -> ~100/day (every story that touches the list)
+//   100 -> ~30/day
+//   300 -> ~13/day   <- default
+//   500 -> ~6/day
+// Set to 0 to restore the old summarize-everything behaviour.
+export const MIN_POINTS_TO_SUMMARIZE = Number(
+  process.env.MIN_POINTS_TO_SUMMARIZE ?? 300,
+);
 
 // --- Article extraction ---
 export const ARTICLE_FETCH_TIMEOUT_MS = 15_000;
