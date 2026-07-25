@@ -28,6 +28,25 @@ export const OPENAI_ENDPOINT =
   process.env.OPENAI_ENDPOINT ?? "https://chatgpt.int.exe.xyz/v1/responses";
 export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.5";
 
+/**
+ * Parse an integer env var, falling back to `fallback` when unset or garbage.
+ *
+ * Most numeric config here is a plain `Number(process.env.X ?? default)`, which turns a
+ * typo into NaN and lets it propagate. That's tolerable where NaN fails loudly, but the
+ * two knobs below fail badly: a NaN concurrency makes pLimit() throw on every cycle, and
+ * a NaN points threshold compares false against every score, silently summarizing nothing
+ * and looking exactly like "HN was quiet today". Both are one typo away in a systemd unit.
+ * Only the new knobs use this — retrofitting the rest is a separate change.
+ */
+function intEnv(raw: string | undefined, fallback: number, min: number): number {
+  // Empty/whitespace-only counts as unset: `Number("")` is 0, so a bare
+  // `Environment=MIN_POINTS_TO_SUMMARIZE=` in the unit would otherwise read as a
+  // deliberate 0 and silently switch the gate off.
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= min ? Math.floor(n) : fallback;
+}
+
 // --- Refresh / pipeline ---
 export const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // hourly
 export const CONCURRENCY_LIMIT = 5; // parallel fetch+summarize workers
@@ -39,7 +58,7 @@ export const MAX_NEW_PER_REFRESH = 60;
 // Concurrency for the per-cycle metadata sweep over the best list. These are cheap
 // single-GET item reads (no extraction, no summarization), so they run wider than
 // CONCURRENCY_LIMIT — the whole ~200-story sweep should finish in a few seconds.
-export const METADATA_CONCURRENCY = Number(process.env.METADATA_CONCURRENCY ?? 12);
+export const METADATA_CONCURRENCY = intEnv(process.env.METADATA_CONCURRENCY, 12, 1);
 // A story must reach this many points before it is summarized at all.
 //
 // Without a gate every story that so much as touches the best list gets summarized
@@ -54,8 +73,10 @@ export const METADATA_CONCURRENCY = Number(process.env.METADATA_CONCURRENCY ?? 1
 //   300 -> ~13/day   <- default
 //   500 -> ~6/day
 // Set to 0 to restore the old summarize-everything behaviour.
-export const MIN_POINTS_TO_SUMMARIZE = Number(
-  process.env.MIN_POINTS_TO_SUMMARIZE ?? 300,
+export const MIN_POINTS_TO_SUMMARIZE = intEnv(
+  process.env.MIN_POINTS_TO_SUMMARIZE,
+  300,
+  0,
 );
 
 // --- Article extraction ---

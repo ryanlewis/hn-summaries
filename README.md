@@ -12,7 +12,7 @@ An AI-summarized RSS feed of [Hacker News's "best"](https://news.ycombinator.com
 |---|---|---|
 | `?sort=date\|points` | `date` | `date` = newest summary first, a rolling stream that keeps stories for a few days after they leave the best list. `points` = the live HN best-list rank (on-list only); a story drops out the moment it leaves the list, and each item is labelled with its rank and flagged when near the bottom. |
 | `?count=N` | `30` | How many stories to include (max `200`). |
-| `?min_points=N` | `0` | Only include stories with at least N points. Scores are refreshed every cycle, so this filters on a story's current standing, not its standing when it was summarized. |
+| `?min_points=N` | `0` | Only include stories with at least N points. Scores are refreshed every cycle **while a story is on the best list**, so this filters on current standing rather than standing at summarization time. Stories the `date` sort keeps after they leave the list hold their last on-list score. |
 
 Examples: [`/feed?sort=points`](https://hn.rlew.io/feed?sort=points), [`/feed?count=10`](https://hn.rlew.io/feed?count=10), [`/feed?min_points=300`](https://hn.rlew.io/feed?min_points=300), `/feed?sort=points&count=15&min_points=200`.
 
@@ -51,7 +51,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 | `/feed` | RSS 2.0 feed (`?sort`, `?count`, `?min_points`). Also `/feed.xml`. |
 | `/` | HTML landing page: usage + latest 5 stories, with a Newest/Top-by-points toggle (`?sort`). |
 | `/healthz` | Liveness + cached story count. |
-| `/status` | Last refresh time + duration, next-refresh ETA, cache size (total / on-list / off-list / cap), last prune + eviction counts, how many scores moved and how many stories were held back below the points gate, last error, and a fallback breakdown (count/percent + tally by reason). |
+| `/status` | Last refresh time + duration, next-refresh ETA, cache size (total / on-list / off-list / cap), last prune + eviction counts, how many scores moved, how many new stories were held back (separately: below the points gate vs no metadata), last error, and a fallback breakdown (count/percent + tally by reason). |
 | `/robots.txt` | Allow-all (it's a public feed). |
 
 ## Running locally
@@ -64,7 +64,7 @@ bun start            # bun index.ts — serves on :8000, runs the first refresh 
 bun run typecheck    # tsc --noEmit
 ```
 
-The first boot summarizes the full best list (~200 stories, a few minutes); `/feed` returns `503` until the cache has entries. The cache persists to `data/cache.json` (gitignored), so restarts are instant.
+The first boot summarizes whichever best-list stories clear `MIN_POINTS_TO_SUMMARIZE` — around 25-30 of the ~200 at the default threshold, capped at `MAX_NEW_PER_REFRESH` (60) per cycle. `/feed` returns `503` until the cache has entries. The cache persists to `data/cache.json` (gitignored), so restarts are instant.
 
 ### Configuration
 

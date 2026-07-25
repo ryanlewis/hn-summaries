@@ -34,9 +34,14 @@ export interface RefreshState {
   lastRecoveredCount: number; // fallbacks re-summarized successfully by the retry pass
   lastPruned: number; // off-list stories dropped past the retention window
   lastEvicted: number; // off-list stories dropped by the size cap
-  lastScoreUpdates: number; // cached on-list stories whose score/comments moved this cycle
-  lastGatedByPoints: number; // new stories held back below MIN_POINTS_TO_SUMMARIZE
-  lastMetadataMisses: number; // best-list ids HN wouldn't serve during the sweep
+  lastScoreUpdates: number; // cached on-list stories whose score OR comment count moved
+  lastGatedByPoints: number; // new stories with a known score below MIN_POINTS_TO_SUMMARIZE
+  lastGatedNoMetadata: number; // new stories held back because the sweep had no score for them
+  // Best-list ids the sweep couldn't resolve. fetchStory() returns null for permanent
+  // reasons (dead/deleted/non-story/untitled) as well as transient errors, so a steady
+  // nonzero value here is more likely one dead story still on the list than HN being
+  // flaky — don't read it as an error rate.
+  lastMetadataMisses: number;
   lastError: string | null;
   totalRefreshes: number;
 }
@@ -51,6 +56,7 @@ export const refreshState: RefreshState = {
   lastEvicted: 0,
   lastScoreUpdates: 0,
   lastGatedByPoints: 0,
+  lastGatedNoMetadata: 0,
   lastMetadataMisses: 0,
   lastError: null,
   totalRefreshes: 0,
@@ -251,13 +257,24 @@ export async function runRefresh(): Promise<void> {
 
     // Only summarize stories that have proven themselves. A story below the threshold
     // is left uncached and re-evaluated every cycle, so it's picked up the moment it
-    // crosses — by which point its discussion is worth summarizing too. Ids missing from
-    // the sweep are held back as well; they cost nothing to reconsider next cycle.
+    // crosses — by which point its discussion is worth summarizing too.
+    //
+    // The two reasons a story is held back are counted separately: genuinely below the
+    // threshold, versus absent from the sweep so we have no score to judge it on. Rolling
+    // them together would report HN being unreachable as "not popular enough", which is
+    // exactly the wrong conclusion to draw from a quiet feed. (At threshold 0 the `?? 0`
+    // admits sweep misses, so both counters stay 0 and behaviour matches the pre-gate
+    // pipeline: processStory refetches and leaves them uncached on failure.)
     const uncached = bestIds.filter((id) => !cache.stories[String(id)]);
-    const allNew = uncached.filter(
-      (id) => (live.get(id)?.score ?? 0) >= MIN_POINTS_TO_SUMMARIZE,
-    );
-    const gatedByPoints = uncached.length - allNew.length;
+    let gatedByPoints = 0;
+    let gatedByMissingMetadata = 0;
+    const allNew = uncached.filter((id) => {
+      const fresh = live.get(id);
+      if ((fresh?.score ?? 0) >= MIN_POINTS_TO_SUMMARIZE) return true;
+      if (fresh) gatedByPoints++;
+      else gatedByMissingMetadata++;
+      return false;
+    });
     const toProcess = allNew.slice(0, MAX_NEW_PER_REFRESH);
     const deferred = allNew.length - toProcess.length;
     const removed = pruneStale(cache, now); // only stories off-list past the retention window
@@ -267,6 +284,10 @@ export async function runRefresh(): Promise<void> {
       }${
         gatedByPoints > 0
           ? `; ${gatedByPoints} below ${MIN_POINTS_TO_SUMMARIZE}pts`
+          : ""
+      }${
+        gatedByMissingMetadata > 0
+          ? `; ${gatedByMissingMetadata} held (no metadata)`
           : ""
       }${
         metadataMisses > 0 ? `; ${metadataMisses} metadata misses` : ""
@@ -368,6 +389,7 @@ export async function runRefresh(): Promise<void> {
     refreshState.lastEvicted = evicted;
     refreshState.lastScoreUpdates = scoreUpdates;
     refreshState.lastGatedByPoints = gatedByPoints;
+    refreshState.lastGatedNoMetadata = gatedByMissingMetadata;
     refreshState.lastMetadataMisses = metadataMisses;
     refreshState.lastRefreshAt = Date.now();
     refreshState.lastError = null;

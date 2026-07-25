@@ -138,6 +138,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       lastEvicted: refreshState.lastEvicted,
       lastScoreUpdates: refreshState.lastScoreUpdates,
       lastGatedByPoints: refreshState.lastGatedByPoints,
+      lastGatedNoMetadata: refreshState.lastGatedNoMetadata,
       lastMetadataMisses: refreshState.lastMetadataMisses,
       minPointsToSummarize: MIN_POINTS_TO_SUMMARIZE,
       totalRefreshes: refreshState.totalRefreshes,
