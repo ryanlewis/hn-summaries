@@ -15,7 +15,7 @@ bun run typecheck  # tsc --noEmit (the only "test"; run this before committing)
 ```
 
 - **Local dev without a VM:** `bun run dev` = `CACHE_PATH=fixtures/cache.sample.json REFRESH_DISABLED=1 bun index.ts`. It serves the committed fixture (`fixtures/cache.sample.json`, ~15 records hitting every render branch) and skips the boot + hourly refresh entirely — no HN fetch, no summarization, no Chrome. The point: iterate on `page.ts` / `feed.ts` / `html.ts` offline at zero cost (summarization only authenticates on an exe.dev VM, so the real pipeline can't run off-VM). `CACHE_PATH` (override the cache file; resolved against the cwd when relative) and `REFRESH_DISABLED` (skip the network pipeline, serve the cache only) both live in `config.ts`.
-- Runs on **Bun** (≥1.3.12 — `Bun.WebView` needs 1.3.12+). Dev and deploy run 1.4.2, recorded in `.bun-version` for version managers/CI; Bun doesn't read it and the systemd unit execs whatever `/home/exedev/.bun/bin/bun` is, so the version is documented, not enforced. Bun runs the TS directly; there is no `tsx`, no build, no bundler, no test runner.
+- Runs on **Bun** (≥1.3.12 — `Bun.WebView` needs 1.3.12+). Dev and deploy run 1.4.2, recorded in `.bun-version` for version managers/CI; Bun doesn't read it and the systemd unit execs an absolute path, so the version is documented, not enforced — see Deployment for which binary that path currently is. Bun runs the TS directly; there is no `tsx`, no build, no bundler, no test runner.
 - There is no lint step. Type-checking is the gate.
 - `smoke.ts` is a throwaway one-shot that runs a single real HN story through the whole pipeline and writes `/tmp/smoke-{feed.xml,page.html}` (one gateway call, ~1¢). It's gitignored; recreate it ad hoc (`bun smoke.ts`) to eyeball pipeline output without touching the cache.
 - Note the `.js` extension on all relative imports (e.g. `import ... from "./config.js"`) — required by `NodeNext` module resolution even though the source is `.ts`. Bun resolves these too. Match this when adding files.
@@ -57,7 +57,9 @@ All endpoints/models are env-overridable. See `https://exe.dev/docs.md` for prox
 
 ## Deployment
 
-Runs as the systemd unit `hn-summaries` (repo copy: `hn-summaries.service`; installed at `/etc/systemd/system/`). Port 8000, `Restart=on-failure`, logs to journald. `ExecStart` is the absolute **bun** binary (`/home/exedev/.bun/bin/bun index.ts`); after changing the unit, copy it to `/etc/systemd/system/` and `sudo systemctl daemon-reload`.
+Runs as the systemd unit `hn-summaries` (repo copy: `hn-summaries.service`; installed at `/etc/systemd/system/`). Port 8000, `Restart=on-failure`, logs to journald. `ExecStart` is an absolute **bun** binary path; after changing the unit, copy it to `/etc/systemd/system/` and `sudo systemctl daemon-reload`.
+
+**Which bun the unit runs.** `ExecStart` currently points at the side-by-side install `/home/exedev/.bun-1.4.2/bin/bun` — *not* the default `/home/exedev/.bun/bin/bun`, which is still 1.3.14 and is deliberately kept as the rollback. Rolling back is a one-line edit plus `daemon-reload` + `restart`, with no download, which is why the switch was done this way rather than by upgrading in place. Note `bun upgrade` cannot target a version — it installs whatever is latest stable — so don't reach for it here. Consolidating 1.4.2 into `~/.bun` and returning `ExecStart` to the generic path is a later step; until then the unit carries a version number, and copying a stale repo copy of the unit over the installed one would silently downgrade the running service to 1.3.14.
 
 ```bash
 journalctl -u hn-summaries -f          # tail logs

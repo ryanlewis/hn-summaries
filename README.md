@@ -114,6 +114,8 @@ sudo systemctl enable --now hn-summaries
 journalctl -u hn-summaries -f
 ```
 
+`ExecStart` in the unit is an absolute bun path, currently the side-by-side install `/home/exedev/.bun-1.4.2/bin/bun`. The default `/home/exedev/.bun/bin/bun` is still 1.3.14 and is kept as the rollback: point `ExecStart` back at it, `daemon-reload`, restart — no download. Folding 1.4.2 into `~/.bun` so the unit can use the generic path again is a later step; until then, check the unit's path before copying it over an installed one, or you may downgrade the running service.
+
 ---
 
 Story content © its respective authors; summaries are AI-generated and may contain errors.
