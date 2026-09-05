@@ -56,7 +56,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 
 ## Running locally
 
-Requires [Bun](https://bun.sh) ≥1.3.12 (pinned to 1.3.14 — `Bun.WebView` powers the browser extraction tier). Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary — install one with `bun run install-browser` (Playwright's Chromium), put one on `$PATH`, or point `BUN_CHROME_PATH` at it; the app auto-resolves whichever it finds at startup. Disable the tier with `BROWSER_FALLBACK_ENABLED=false`.
+Requires [Bun](https://bun.sh) ≥1.3.12 — `Bun.WebView`, which powers the browser extraction tier, shipped in 1.3.12. Dev and deploy run 1.4.2, recorded in `.bun-version`. That file is there for version managers and CI to read: Bun itself ignores it, so an older Bun still starts — the browser tier just silently stops working. Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary — install one with `bun run install-browser` (Playwright's Chromium), put one on `$PATH`, or point `BUN_CHROME_PATH` at it; the app auto-resolves whichever it finds at startup. Disable the tier with `BROWSER_FALLBACK_ENABLED=false`.
 
 ```bash
 bun install
@@ -113,6 +113,8 @@ sudo cp hn-summaries.service /etc/systemd/system/
 sudo systemctl enable --now hn-summaries
 journalctl -u hn-summaries -f
 ```
+
+`ExecStart` in the unit is an absolute bun path, currently the side-by-side install `/home/exedev/.bun-1.4.2/bin/bun`. The default `/home/exedev/.bun/bin/bun` is still 1.3.14 and is kept as the rollback: point `ExecStart` back at it, `daemon-reload`, restart — no download. Folding 1.4.2 into `~/.bun` so the unit can use the generic path again is a later step; until then, check the unit's path before copying it over an installed one, or you may downgrade the running service.
 
 ---
 

@@ -12,7 +12,11 @@ Group=exedev
 WorkingDirectory=/home/exedev/app
 # Absolute bun path so PATH resolution is irrelevant under systemd.
 # Bun runs the TS directly (no tsx) and provides Bun.WebView for browser extraction.
-ExecStart=/home/exedev/.bun/bin/bun /home/exedev/app/index.ts
+# This points at the side-by-side 1.4.2 install, not the default ~/.bun. The default
+# install is still 1.3.14 and is kept as the offline rollback: switch this line back to
+# /home/exedev/.bun/bin/bun, daemon-reload, restart — no download needed. Consolidating
+# 1.4.2 into ~/.bun so this can go back to the generic path is a later step.
+ExecStart=/home/exedev/.bun-1.4.2/bin/bun /home/exedev/app/index.ts
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
