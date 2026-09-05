@@ -56,7 +56,7 @@ Summaries are generated through the exe.dev internal proxies, which authenticate
 
 ## Running locally
 
-Requires [Bun](https://bun.sh) ≥1.3.12 (pinned to 1.4.2 — `Bun.WebView`, which powers the browser extraction tier, shipped in 1.3.12). The pin is in `.bun-version` and `packageManager` in `package.json`. Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary — install one with `bun run install-browser` (Playwright's Chromium), put one on `$PATH`, or point `BUN_CHROME_PATH` at it; the app auto-resolves whichever it finds at startup. Disable the tier with `BROWSER_FALLBACK_ENABLED=false`.
+Requires [Bun](https://bun.sh) ≥1.3.12 — `Bun.WebView`, which powers the browser extraction tier, shipped in 1.3.12. Dev and deploy run 1.4.2, recorded in `.bun-version` and in `packageManager` in `package.json`. Those two files are for version managers and CI to read: Bun itself ignores both, so an older Bun still starts — the browser tier just silently stops working. Bun runs the TypeScript directly: no build step, no bundler, no `tsx`. Summarization needs to run on an exe.dev VM (for the keyless proxies) — or point the endpoints at your own OpenAI/Anthropic-compatible services. The browser tier additionally needs a Chrome/Chromium binary — install one with `bun run install-browser` (Playwright's Chromium), put one on `$PATH`, or point `BUN_CHROME_PATH` at it; the app auto-resolves whichever it finds at startup. Disable the tier with `BROWSER_FALLBACK_ENABLED=false`.
 
 ```bash
 bun install
