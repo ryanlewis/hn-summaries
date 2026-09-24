@@ -26,7 +26,7 @@ flowchart TD
     Gate -->|"no"| Skip["skip — reconsidered next cycle"]
     Gate -->|"yes"| Extract["fetch &amp; extract article text<br/>(Readability/jsdom)"]
     Extract -->|"non-HTML / paywall / no URL"| Fallback["fall back to the discussion"]
-    Extract --> Summarize["summarize<br/>(exe.dev ChatGPT/Codex proxy — gpt-5.5)"]
+    Extract --> Summarize["summarize<br/>(exe.dev ChatGPT/Codex proxy — gpt-5.6-terra)"]
     Fallback --> Summarize
     Summarize --> Cache["JSON cache<br/>(data/cache.json)"]
     Scores --> Cache
@@ -42,7 +42,7 @@ A story that temporarily drops off the best list keeps its summary, so it isn't 
 
 Article text is extracted in tiers: a plain fetch + [Readability](https://github.com/mozilla/readability), then — only on a recoverable failure — a headless-browser render (Chromium via `Bun.WebView`) for JS-heavy pages, and finally a discussion-only fallback. Stories stuck on the fallback are re-extracted on later cycles (a bounded self-healing pass), so a page that was transiently down or needs JS recovers without a manual nudge.
 
-Summaries are generated through the exe.dev internal proxies, which authenticate the VM automatically — **no API key is stored anywhere**. Two backends are selectable via `SUMMARY_PROVIDER`: the [ChatGPT/Codex proxy](https://exe.dev/docs/integrations-github) (`gpt-5.5`, default — draws on the ChatGPT subscription rather than the metered token allowance) or the [LLM gateway](https://exe.dev/docs/shelley/llm-gateway) (`claude-sonnet-4-6`).
+Summaries are generated through the exe.dev internal proxies, which authenticate the VM automatically — **no API key is stored anywhere**. Two backends are selectable via `SUMMARY_PROVIDER`: the [ChatGPT/Codex proxy](https://exe.dev/docs/integrations-github) (`gpt-5.6-terra`, default — draws on the ChatGPT subscription rather than the metered token allowance) or the [LLM gateway](https://exe.dev/docs/shelley/llm-gateway) (`claude-sonnet-4-6`).
 
 ### Endpoints
 
@@ -78,7 +78,7 @@ Environment variables:
 | `PORT` | `8000` | Listen port. |
 | `PUBLIC_URL` | `https://hn.rlew.io` | Canonical origin used in the feed's self-link and the landing page. |
 | `SUMMARY_PROVIDER` | `openai-responses` | Backend: `openai-responses` (ChatGPT/Codex proxy) or `anthropic` (LLM gateway). |
-| `OPENAI_ENDPOINT` / `OPENAI_MODEL` | ChatGPT proxy · `gpt-5.5` | Used when provider is `openai-responses`. |
+| `OPENAI_ENDPOINT` / `OPENAI_MODEL` | ChatGPT proxy · `gpt-5.6-terra` | Used when provider is `openai-responses`. |
 | `LLM_ENDPOINT` / `LLM_MODEL` | LLM gateway · `claude-sonnet-4-6` | Used when provider is `anthropic`. |
 
 Everything else — refresh interval, concurrency, article-size caps, per-refresh cost cap, off-list retention, cache size cap, comment count — lives in [`src/config.ts`](src/config.ts).

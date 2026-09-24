@@ -17,7 +17,7 @@ export const LLM_ENDPOINT =
 export const LLM_MODEL = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
 export const ANTHROPIC_VERSION = "2023-06-01";
 export const LLM_MAX_TOKENS = 400; // output cap (Anthropic path); the summary's length, not the reading budget
-export const LLM_TIMEOUT_MS = 90_000; // reasoning models (gpt-5.5) can take longer
+export const LLM_TIMEOUT_MS = 90_000; // reasoning models (gpt-5.6-terra) can take longer
 
 // Summarization backend.
 //   "openai-responses" — exe.dev ChatGPT/Codex proxy (streaming Responses API).
@@ -26,7 +26,7 @@ export const LLM_TIMEOUT_MS = 90_000; // reasoning models (gpt-5.5) can take lon
 export const SUMMARY_PROVIDER = process.env.SUMMARY_PROVIDER ?? "openai-responses";
 export const OPENAI_ENDPOINT =
   process.env.OPENAI_ENDPOINT ?? "https://chatgpt.int.exe.xyz/v1/responses";
-export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.5";
+export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.6-terra";
 
 /**
  * Parse an integer env var, falling back to `fallback` when unset or garbage.

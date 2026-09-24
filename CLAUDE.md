@@ -50,7 +50,7 @@ A story that throws is left uncached and retried next cycle. A failed refresh le
 
 Summaries go through one of two exe.dev proxies, selected by `SUMMARY_PROVIDER` (`config.ts`). Both auto-authenticate the VM — **no API key is sent or needed.**
 
-- `openai-responses` (**default**) — the exe.dev ChatGPT/Codex proxy, streaming Responses API, at `OPENAI_ENDPOINT` (`https://chatgpt.int.exe.xyz/v1/responses`), model `OPENAI_MODEL` (`gpt-5.5`). Draws on the ChatGPT subscription rather than the metered LLM token allowance.
+- `openai-responses` (**default**) — the exe.dev ChatGPT/Codex proxy, streaming Responses API, at `OPENAI_ENDPOINT` (`https://chatgpt.int.exe.xyz/v1/responses`), model `OPENAI_MODEL` (`gpt-5.6-terra`). Draws on the ChatGPT subscription rather than the metered LLM token allowance.
 - `anthropic` — the exe.dev LLM gateway, Anthropic Messages API, at `LLM_ENDPOINT` (`https://llm.int.exe.xyz/v1/messages`), model `LLM_MODEL` (`claude-sonnet-4-6`). Metered against the token allowance.
 
 All endpoints/models are env-overridable. See `https://exe.dev/docs.md` for proxy details.
