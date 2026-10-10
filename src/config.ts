@@ -17,7 +17,7 @@ export const LLM_ENDPOINT =
 export const LLM_MODEL = process.env.LLM_MODEL ?? "claude-sonnet-4-6";
 export const ANTHROPIC_VERSION = "2023-06-01";
 export const LLM_MAX_TOKENS = 400; // output cap (Anthropic path); the summary's length, not the reading budget
-export const LLM_TIMEOUT_MS = 90_000; // reasoning models (gpt-6.1-sol) can take longer
+export const LLM_TIMEOUT_MS = 90_000; // reasoning models (e.g. the default OPENAI_MODEL) can take longer
 
 // Summarization backend.
 //   "openai-responses" — exe.dev ChatGPT/Codex proxy (streaming Responses API).
