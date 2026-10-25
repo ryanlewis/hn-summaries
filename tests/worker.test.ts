@@ -2,7 +2,7 @@
 // the shared refresh pipeline driven through injected deps (as the cron does).
 import { afterEach, describe, expect, test } from "bun:test";
 import type { CacheFile } from "../src/cache.js";
-import { MIN_POINTS_TO_SUMMARIZE } from "../src/config.js";
+import { BROWSER_TIMEOUT_MS, MIN_POINTS_TO_SUMMARIZE } from "../src/config.js";
 import { htmlToText } from "../src/dom-linkedom.js";
 import { refreshState, runRefresh, type RefreshDeps } from "../src/refresh.js";
 import { browserRenderer, type BrowserBudget } from "../src/worker/browser.js";
@@ -79,6 +79,16 @@ describe("browser renderer budget", () => {
     now += 24 * 60 * 60 * 1000;
     expect((await render("https://d.test")).ok).toBe(true);
     expect(budget).toEqual({ day: "2026-10-26", msUsed: 6000 });
+  });
+
+  test("a response without the usage header is charged the timeout", async () => {
+    const budget: BrowserBudget = { day: "", msUsed: 0 };
+    const render = browserRenderer(
+      { quickAction: async () => new Response("{}", { status: 503 }) },
+      budget,
+    );
+    expect(await render("https://a.test")).toEqual({ ok: false, reason: "error" });
+    expect(budget.msUsed).toBe(BROWSER_TIMEOUT_MS);
   });
 
   test("errors fail cleanly and still count time", async () => {

@@ -55,7 +55,8 @@ export function browserRenderer(
       }
       // Set on every response below 500. Without it, count the timeout so a run of
       // failures can't spend past the budget unseen.
-      const used = Number(res.headers.get("x-browser-ms-used"));
+      const header = res.headers.get("x-browser-ms-used");
+      const used = header === null ? NaN : Number(header); // Number(null) would be 0
       budget.msUsed += Number.isFinite(used) && used >= 0 ? used : BROWSER_TIMEOUT_MS;
 
       if (!res.ok) {
