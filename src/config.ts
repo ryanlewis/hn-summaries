@@ -167,9 +167,12 @@ export const ROLLOFF_WARN_BAND = 25;
 // On-disk cache location. Overridable via CACHE_PATH so local dev can point at a
 // committed fixture (e.g. `fixtures/cache.sample.json`, resolved against the cwd)
 // instead of the live data/cache.json next to the source. See `bun run dev`.
+// (The Worker keeps its cache in KV and has no file: module URL, so it gets a dummy.)
 export const CACHE_PATH =
   process.env.CACHE_PATH ??
-  fileURLToPath(new URL("../data/cache.json", import.meta.url));
+  (import.meta.url?.startsWith("file:")
+    ? fileURLToPath(new URL("../data/cache.json", import.meta.url).href)
+    : "data/cache.json");
 export const CACHE_TMP_PATH = CACHE_PATH + ".tmp";
 export const CACHE_VERSION = 1 as const;
 // Keep summaries for stories that temporarily fall off the best list, so a story
@@ -184,3 +187,43 @@ export const OFFLIST_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 // stories are evicted oldest-summary-first. Sized as on-list (~200) + a rolling off-list
 // tail, kept just above MAX_FEED_COUNT so a full-depth date feed stays servable.
 export const MAX_CACHE_STORIES = 250;
+
+// --- Cloudflare Worker (src/worker/) ---
+// The Worker reaches every model through an AI Gateway via the AI binding. Requests over
+// the binding are pre-authenticated inside the account, and a provider key, when there
+// is one, is stored in the gateway (BYOK), so the Worker holds no key or token.
+//
+// "default" is the account's auto-created gateway, used for the Workers AI soak. Before
+// pointing GATEWAY_PROVIDER at a metered provider, create a dedicated gateway with
+// "Require provider credentials" on and set AI_GATEWAY_ID to it; see
+// docs/workers-migration.md.
+export const AI_GATEWAY_ID = process.env.AI_GATEWAY_ID ?? "default";
+// Which model family sits behind the gateway:
+//   "workers-ai" — Cloudflare-hosted (@cf/...); billed in Workers AI neurons, no key.
+//   "openai" / "anthropic" — a third-party model through the gateway's stored key.
+export const GATEWAY_PROVIDERS = ["workers-ai", "openai", "anthropic"] as const;
+export type GatewayProvider = (typeof GATEWAY_PROVIDERS)[number];
+export const GATEWAY_PROVIDER: GatewayProvider = (
+  GATEWAY_PROVIDERS as readonly string[]
+).includes(process.env.GATEWAY_PROVIDER ?? "")
+  ? (process.env.GATEWAY_PROVIDER as GatewayProvider)
+  : "workers-ai";
+// Model id as the provider names it (no "openai/" style prefix; that's added per provider).
+export const GATEWAY_MODEL =
+  process.env.GATEWAY_MODEL ?? "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+// Output cap for Workers AI. Some of its models default to a few hundred tokens, and
+// reasoning models spend part of the cap thinking, so this is headroom, not length.
+export const WORKERS_AI_MAX_TOKENS = 2048;
+// A cron invocation is killed after 15 minutes of wall clock, losing the whole cycle.
+// Stop starting new stories this long into a run so in-flight ones (up to
+// RETRY_ATTEMPTS × LLM_TIMEOUT_MS) can finish and the cache is saved.
+export const WORKER_RUN_BUDGET_MS = 8 * 60 * 1000;
+// Browser Rendering (the Worker's browser tier) daily budget, measured from each
+// response's X-Browser-Ms-Used. Workers Paid includes 10 browser hours a month; 15
+// minutes a day keeps a 31-day month under 8. Past the budget, the tier is skipped
+// until the next UTC day. 0 disables the tier.
+export const BROWSER_DAILY_BUDGET_MS = intEnv(
+  process.env.BROWSER_DAILY_BUDGET_MS,
+  15 * 60 * 1000,
+  0,
+);
