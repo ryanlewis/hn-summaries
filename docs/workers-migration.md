@@ -138,9 +138,19 @@ The other four stories ("Twelve years of distributed SQLite", the Google ads pol
 
 ## Soak results
 
-The soak runs the Worker from a cold cache next to the VM. The comparison script fetches both `?sort=points&count=200` feeds and compares the on-list stories at or above the 300-point gate, then the GUIDs.
+The soak runs the Worker from a cold cache next to the VM. `python3 scripts/soak-compare.py` (`-v` prints summaries side by side) fetches both `?sort=points&count=200` feeds and compares the on-list stories at or above the 300-point gate, then the GUIDs and summary length. Add a row after each hourly run.
 
-<!-- SOAK -->
+| Run (UTC) | Worker run | VM above gate | Worker above gate | Same GUIDs | Only on one side | Median words (VM / Worker) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-25 02:07 (first, cold cache) | 182 s wall, 1.3 s CPU, 17 new, 0 deferred, `lastError` null | 17 | 17 | 17 | none | 102 / 114 |
+
+Notes from the first run:
+
+- **The first scheduled time after deploy (01:07) did not fire.** The cron had been created at 01:00:52; the next one, 02:07, fired on time. Not verified: whether new cron triggers take a few minutes to arm.
+- **The browser tier works.** It recovered "Apple Music 404 Not Found", where the fetch got no readable text. It used 18 s of browser time all day.
+- **One fallback the VM didn't have.** "Show HN: Steal My Bitcoin" timed out on fetch and on the browser render, so it got a discussion-only summary. The VM read the article. The retry pass will try it again for up to 3 cycles.
+- **Comparable summaries.** Same structure and specifics. The Worker's summaries run about 10% longer, still under the 120-word limit in most cases. For example, on "Dutch government had hacked into Jared Kushner's phone" both explain that the linked post is Kushner's denial, and both report the commenters doubting the headline.
+- **KV caches "not found" for about a minute.** `/feed` returned 503 for up to 60 s after the first write, because the earlier reads of the missing key were cached at the edge. This only matters on a cold start.
 
 ## What Ryan needs to do
 
