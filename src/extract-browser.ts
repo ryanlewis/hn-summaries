@@ -18,7 +18,8 @@ import {
   BROWSER_VIEWPORT_HEIGHT,
   BROWSER_VIEWPORT_WIDTH,
 } from "./config.js";
-import { htmlToArticleText, type ExtractionResult } from "./extract.js";
+import { htmlToArticleText } from "./dom-jsdom.js";
+import type { ExtractionResult } from "./extract.js";
 
 // Resolve a Chrome/Chromium binary without pinning a version. Order:
 //   1. an explicit, existing $BUN_CHROME_PATH (operator override wins);

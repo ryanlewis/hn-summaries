@@ -1,14 +1,13 @@
-// Article fetching + readable-text extraction, plus an HTML-to-text helper for
-// HN comment / self-post bodies. All jsdom/Readability DOM values are cast to
-// `any` so the project type-checks without pulling the "DOM" lib (which would
+// Article fetching + readable-text extraction. Runtime-neutral: the DOM used for
+// Readability is supplied by the caller (`parse`), so the Bun service plugs in jsdom
+// (dom-jsdom.ts) and the Worker plugs in linkedom (dom-linkedom.ts). All DOM values are
+// cast to `any` so the project type-checks without pulling the "DOM" lib (which would
 // collide with Node's global fetch/Response types).
-import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import {
   ARTICLE_FETCH_TIMEOUT_MS,
   ARTICLE_MAX_BYTES,
   ARTICLE_TEXT_MAX_CHARS,
-  BROWSER_FALLBACK_ENABLED,
   BROWSER_RECOVERABLE_REASONS,
   USER_AGENT,
 } from "./config.js";
@@ -23,6 +22,11 @@ export type ExtractFailReason =
 export type ExtractionResult =
   | { ok: true; text: string }
   | { ok: false; reason: ExtractFailReason };
+
+/** Readability over a chunk of HTML; `url` is the document base URL. */
+export type ParseArticle = (html: string, url: string) => ExtractionResult;
+/** Render a page in a real browser and extract it (the fallback tier). */
+export type RenderArticle = (url: string) => Promise<ExtractionResult>;
 
 const BLOCKED_CONTENT_TYPES = [
   "application/pdf",
@@ -45,6 +49,7 @@ function isHtmlContentType(ct: string): boolean {
 
 export async function extractArticleText(
   url: string,
+  parse: ParseArticle,
 ): Promise<ExtractionResult> {
   // Best-effort HEAD pre-check (many servers don't support HEAD — ignore failures).
   try {
@@ -117,22 +122,17 @@ export async function extractArticleText(
 
   if (!html.trim()) return { ok: false, reason: "empty" };
 
-  return htmlToArticleText(html, url);
+  return parse(html, url);
 }
 
 /**
- * Run Readability over a chunk of HTML and return the readable text (or a fail
- * reason). Shared by the fetch path above and the browser path (extract-browser.ts),
- * so both use one extraction implementation. `url` is the document base URL.
+ * Run Readability over an already-parsed document and return the readable text (or a
+ * fail reason). The one extraction implementation behind every ParseArticle, whichever
+ * DOM built `document`.
  */
-export function htmlToArticleText(html: string, url: string): ExtractionResult {
-  if (!html.trim()) return { ok: false, reason: "empty" };
+export function readableText(document: unknown): ExtractionResult {
   try {
-    const dom = new JSDOM(html, {
-      url,
-      virtualConsole: new VirtualConsole(), // silent: no listeners attached
-    });
-    const article = new Readability(dom.window.document as any).parse() as
+    const article = new Readability(document as any).parse() as
       | { textContent?: string }
       | null;
     const text = (article?.textContent ?? "").replace(/\s+\n/g, "\n").trim();
@@ -146,24 +146,26 @@ export function htmlToArticleText(html: string, url: string): ExtractionResult {
 /**
  * Tiered extraction: try the plain fetch+Readability path first; if it fails with a
  * reason a real browser can plausibly recover (see BROWSER_RECOVERABLE_REASONS), render
- * the page with Bun.WebView and re-run Readability. Returns the fetch result unchanged
- * when the browser tier is disabled, not applicable, or also fails.
+ * the page with `render` (Bun.WebView on the VM, Browser Rendering on the Worker).
+ * Returns the fetch result unchanged when there is no `render` (tier disabled), the
+ * reason isn't recoverable, or the render also fails.
  */
 export async function extractArticleTextTiered(
   url: string,
+  parse: ParseArticle,
+  render?: RenderArticle,
 ): Promise<ExtractionResult> {
-  const fetched = await extractArticleText(url);
+  const fetched = await extractArticleText(url, parse);
   if (fetched.ok) return fetched;
 
   if (
-    !BROWSER_FALLBACK_ENABLED ||
+    !render ||
     !(BROWSER_RECOVERABLE_REASONS as readonly string[]).includes(fetched.reason)
   ) {
     return fetched;
   }
 
-  const { extractArticleViaBrowser } = await import("./extract-browser.js");
-  const rendered = await extractArticleViaBrowser(url);
+  const rendered = await render(url);
   if (rendered.ok) return rendered;
 
   // Both tiers failed — return the original fetch-path reason unchanged. It must stay one
@@ -172,21 +174,15 @@ export async function extractArticleTextTiered(
   return fetched;
 }
 
-// --- HTML → plain text (HN comment & self-post bodies) ---
-// One reusable scratch document. htmlToText runs fully synchronously (no await),
-// so even under concurrent refresh workers there's no interleaving on it.
-const scratchDoc: any = new JSDOM(
-  "<!DOCTYPE html><body><div id='scratch'></div></body>",
-  { virtualConsole: new VirtualConsole() },
-).window.document;
-
-export function htmlToText(html: string): string {
-  const el = scratchDoc.getElementById("scratch");
-  el.innerHTML = String(html)
+/** Pre-clean an HN comment / self-post body so block breaks survive textContent. */
+export function commentMarkupForText(html: string): string {
+  return String(html)
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<p[^>]*>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n");
-  const text: string = el.textContent ?? "";
-  el.innerHTML = "";
+}
+
+/** Collapse the blank-line runs textContent leaves behind. */
+export function tidyText(text: string): string {
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }

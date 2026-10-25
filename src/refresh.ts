@@ -17,14 +17,35 @@ import {
 import {
   capCache,
   getStories,
-  loadCache,
   pruneStale,
-  saveCache,
+  type CacheFile,
   type CachedStory,
 } from "./cache.js";
-import { extractArticleTextTiered, htmlToText } from "./extract.js";
+import type { ExtractionResult } from "./extract.js";
 import { fetchBestIds, fetchComment, fetchStory, type HNStory } from "./hn.js";
-import { summarize } from "./summarize.js";
+import type { SummarizeInput } from "./summarize.js";
+
+/**
+ * The runtime-specific pieces of a refresh cycle. The Bun service (index.ts) wires in
+ * the JSON file cache, jsdom, Bun.WebView and the exe.dev proxies; the Worker
+ * (src/worker/index.ts) wires in KV, linkedom, Browser Rendering and AI Gateway.
+ * Everything else about a cycle (the points gate, caps, retry pass, bounds) is shared.
+ */
+export interface RefreshDeps {
+  loadCache(): Promise<CacheFile>;
+  saveCache(cache: CacheFile): Promise<void>;
+  /** Tiered article extraction (fetch, then the browser tier if there is one). */
+  extractArticle(url: string): Promise<ExtractionResult>;
+  /** HTML-to-text for HN comment / self-post bodies. */
+  htmlToText(html: string): string;
+  summarize(input: SummarizeInput): Promise<string>;
+  /**
+   * Date.now() after which no new story or fallback retry is started. Work not started
+   * is left as it was and picked up next cycle, the same as the MAX_NEW_PER_REFRESH
+   * overflow. Lets a run with a hard wall-clock limit (a Worker cron) finish and save.
+   */
+  deadlineAt?: number;
+}
 
 export interface RefreshState {
   running: boolean;
@@ -37,6 +58,7 @@ export interface RefreshState {
   lastScoreUpdates: number; // cached on-list stories whose score OR comment count moved
   lastGatedByPoints: number; // new stories with a known score below MIN_POINTS_TO_SUMMARIZE
   lastGatedNoMetadata: number; // new stories held back because the sweep had no score for them
+  lastDeferredByDeadline: number; // new stories + fallback retries not started before deps.deadlineAt
   // Best-list ids the sweep couldn't resolve. fetchStory() returns null for permanent
   // reasons (dead/deleted/non-story/untitled) as well as transient errors, so a steady
   // nonzero value here is more likely one dead story still on the list than HN being
@@ -57,19 +79,23 @@ export const refreshState: RefreshState = {
   lastScoreUpdates: 0,
   lastGatedByPoints: 0,
   lastGatedNoMetadata: 0,
+  lastDeferredByDeadline: 0,
   lastMetadataMisses: 0,
   lastError: null,
   totalRefreshes: 0,
 };
 
-async function gatherComments(kids: number[] | undefined): Promise<string> {
+async function gatherComments(
+  deps: RefreshDeps,
+  kids: number[] | undefined,
+): Promise<string> {
   const ids = (kids ?? []).slice(0, COMMENTS_TO_FETCH);
   if (ids.length === 0) return "";
   const comments = await Promise.all(ids.map(fetchComment));
   return comments
     .filter((c): c is NonNullable<typeof c> => c !== null && !!c.text)
     .map((c) => {
-      const text = htmlToText(c.text!).slice(0, COMMENT_MAX_CHARS);
+      const text = deps.htmlToText(c.text!).slice(0, COMMENT_MAX_CHARS);
       return text ? `- ${text}` : "";
     })
     .filter(Boolean)
@@ -98,6 +124,7 @@ async function fetchBestMetadata(ids: number[]): Promise<Map<number, HNStory>> {
 }
 
 async function processStory(
+  deps: RefreshDeps,
   id: number,
   rank: number,
   prefetched?: HNStory,
@@ -107,7 +134,7 @@ async function processStory(
   const story = prefetched ?? (await fetchStory(id));
   if (!story) return null;
 
-  const commentsText = await gatherComments(story.kids);
+  const commentsText = await gatherComments(deps, story.kids);
 
   // Determine article text (or fallback reason).
   let articleText: string | undefined;
@@ -115,18 +142,18 @@ async function processStory(
 
   if (!story.url) {
     if (story.text) {
-      articleText = htmlToText(story.text).slice(0, SELFPOST_TEXT_MAX_CHARS);
+      articleText = deps.htmlToText(story.text).slice(0, SELFPOST_TEXT_MAX_CHARS);
     }
     if (!articleText) fallbackReason = "self-post without text";
   } else {
-    const extracted = await extractArticleTextTiered(story.url);
+    const extracted = await deps.extractArticle(story.url);
     if (extracted.ok) articleText = extracted.text;
     else fallbackReason = extracted.reason;
   }
 
   const isFallback = !articleText;
 
-  const summary = await summarize({
+  const summary = await deps.summarize({
     title: story.title!,
     url: story.url,
     articleText,
@@ -157,11 +184,14 @@ async function processStory(
  * counter; only pays for a re-summarize when extraction now succeeds. Returns true if
  * the story was recovered (flipped out of fallback). Mutates `story` directly.
  */
-async function retryFallback(story: CachedStory): Promise<boolean> {
+async function retryFallback(
+  deps: RefreshDeps,
+  story: CachedStory,
+): Promise<boolean> {
   story.fallbackAttempts = (story.fallbackAttempts ?? 0) + 1;
   if (!story.url) return false; // self-post fallbacks aren't recoverable by extraction
 
-  const extracted = await extractArticleTextTiered(story.url);
+  const extracted = await deps.extractArticle(story.url);
   if (!extracted.ok) {
     story.fallbackReason = extracted.reason; // record the latest reason
     return false;
@@ -174,8 +204,8 @@ async function retryFallback(story: CachedStory): Promise<boolean> {
   const fresh = await fetchStory(story.id);
   if (!fresh) return false;
 
-  const commentsText = await gatherComments(fresh.kids);
-  const summary = await summarize({
+  const commentsText = await gatherComments(deps, fresh.kids);
+  const summary = await deps.summarize({
     title: story.title,
     url: story.url,
     articleText: extracted.text,
@@ -191,7 +221,7 @@ async function retryFallback(story: CachedStory): Promise<boolean> {
 }
 
 /** Run a single refresh cycle. Safe to call repeatedly; no-ops if already running. */
-export async function runRefresh(): Promise<void> {
+export async function runRefresh(deps: RefreshDeps): Promise<void> {
   if (refreshState.running) {
     console.log("[refresh] already running, skipping");
     return;
@@ -203,7 +233,7 @@ export async function runRefresh(): Promise<void> {
     // singleton on every request, so mutating it in place would let /feed and / observe a
     // half-updated cycle (some ranks bumped, others not; prunes/new entries appearing one
     // at a time). saveCache() swaps this clone in as the new singleton atomically at the end.
-    const cache = structuredClone(await loadCache());
+    const cache = structuredClone(await deps.loadCache());
     const bestIds = await fetchBestIds();
     if (bestIds.length === 0) {
       console.warn("[refresh] best list empty — leaving cache untouched");
@@ -294,13 +324,21 @@ export async function runRefresh(): Promise<void> {
       }; ${removed} pruned; cache ${Object.keys(cache.stories).length}`,
     );
 
+    const pastDeadline = () =>
+      deps.deadlineAt !== undefined && Date.now() > deps.deadlineAt;
+    let deferredByDeadline = 0;
+
     const limit = pLimit(CONCURRENCY_LIMIT);
     let done = 0;
     const results = await Promise.all(
       toProcess.map((id) =>
         limit(async () => {
+          if (pastDeadline()) {
+            deferredByDeadline++;
+            return null; // left uncached; picked up next cycle
+          }
           try {
-            const entry = await processStory(id, rankOf.get(id)!, live.get(id));
+            const entry = await processStory(deps, id, rankOf.get(id)!, live.get(id));
             if (entry) {
               cache.stories[String(id)] = entry;
               done++;
@@ -349,8 +387,12 @@ export async function runRefresh(): Promise<void> {
         await Promise.all(
           retryable.map((story) =>
             limit(async () => {
+              if (pastDeadline()) {
+                deferredByDeadline++;
+                return;
+              }
               try {
-                if (await retryFallback(story)) {
+                if (await retryFallback(deps, story)) {
                   recoveredFallbacks++;
                   console.log(
                     `[refresh] recovered fallback #${story.id} ${story.title.slice(0, 70)}`,
@@ -380,8 +422,12 @@ export async function runRefresh(): Promise<void> {
       );
     }
 
+    if (deferredByDeadline > 0) {
+      console.log(`[refresh] deadline: ${deferredByDeadline} not started, left for next cycle`);
+    }
+
     cache.updatedAt = Date.now();
-    await saveCache(cache);
+    await deps.saveCache(cache);
 
     refreshState.lastNewCount = results.filter(Boolean).length;
     refreshState.lastRecoveredCount = recoveredFallbacks;
@@ -390,6 +436,7 @@ export async function runRefresh(): Promise<void> {
     refreshState.lastScoreUpdates = scoreUpdates;
     refreshState.lastGatedByPoints = gatedByPoints;
     refreshState.lastGatedNoMetadata = gatedByMissingMetadata;
+    refreshState.lastDeferredByDeadline = deferredByDeadline;
     refreshState.lastMetadataMisses = metadataMisses;
     refreshState.lastRefreshAt = Date.now();
     refreshState.lastError = null;

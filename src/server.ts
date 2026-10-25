@@ -1,22 +1,19 @@
-// Minimal HTTP server: /, /feed, /healthz, /status.
+// Minimal HTTP server: static assets here, everything else via routes.ts.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  DEFAULT_FEED_COUNT,
-  DEFAULT_FEED_SORT,
-  FEED_SORTS,
-  type FeedSort,
-  MAX_CACHE_STORIES,
-  MAX_FEED_COUNT,
-  MIN_POINTS_TO_SUMMARIZE,
+  LLM_MODEL,
+  OPENAI_MODEL,
   PORT,
-  REFRESH_INTERVAL_MS,
+  SUMMARY_PROVIDER,
 } from "./config.js";
 import { getStories, loadCache } from "./cache.js";
-import { buildFeedXml } from "./feed.js";
-import { buildLandingPage } from "./page.js";
+import { options } from "./options.js";
 import { refreshState } from "./refresh.js";
+import { route } from "./routes.js";
+
+const SUMMARY_MODEL = SUMMARY_PROVIDER === "anthropic" ? LLM_MODEL : OPENAI_MODEL;
 
 const startedAt = Date.now();
 
@@ -41,22 +38,6 @@ const STATIC_ASSETS: Record<string, { body: Buffer; type: string }> = (() => {
   return map;
 })();
 
-function clamp(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, n));
-}
-
-function intParam(value: string | null, fallback: number): number {
-  if (value === null) return fallback;
-  const n = Number.parseInt(value, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function sortParam(value: string | null): FeedSort {
-  return (FEED_SORTS as readonly string[]).includes(value ?? "")
-    ? (value as FeedSort)
-    : DEFAULT_FEED_SORT;
-}
-
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
 
@@ -71,147 +52,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   const cache = await loadCache();
-  const stories = getStories(cache);
-
-  if (url.pathname === "/robots.txt") {
-    // Fully public feed — allow everything. (No sitemap: it's a single landing page.)
-    res.writeHead(200, {
-      "content-type": "text/plain; charset=utf-8",
-      "cache-control": "public, max-age=86400",
-    });
-    res.end("User-agent: *\nAllow: /\n");
-    return;
-  }
-
-  if (url.pathname === "/healthz") {
-    return sendJson(res, 200, {
-      status: "ok",
-      uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
-      cachedStories: stories.length,
-    });
-  }
-
-  if (url.pathname === "/status") {
-    // Fallback breakdown over the stories that actually appear in the feed (on-list),
-    // for measuring extraction quality / the browser-tier's effect before vs. after.
-    const onList = stories.filter((s) => s.onList !== false);
-    const fallbackStories = onList.filter((s) => s.isFallback);
-    const byReason: Record<string, number> = {};
-    for (const s of fallbackStories) {
-      const reason = s.fallbackReason ?? "unknown";
-      byReason[reason] = (byReason[reason] ?? 0) + 1;
-    }
-    const fallbacks = {
-      onList: onList.length,
-      count: fallbackStories.length,
-      percent: onList.length
-        ? Math.round((1000 * fallbackStories.length) / onList.length) / 10
-        : 0,
-      byReason,
-    };
-    const nextIn = refreshState.lastRefreshAt
-      ? Math.max(
-          0,
-          Math.round(
-            (refreshState.lastRefreshAt + REFRESH_INTERVAL_MS - Date.now()) /
-              1000,
-          ),
-        )
-      : null;
-    return sendJson(res, 200, {
-      status: "ok",
-      uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
-      cachedStories: stories.length,
-      cache: {
-        total: stories.length,
-        onList: onList.length,
-        offList: stories.length - onList.length,
-        cap: MAX_CACHE_STORIES,
-      },
-      lastRefreshAt: refreshState.lastRefreshAt
-        ? new Date(refreshState.lastRefreshAt).toISOString()
-        : null,
-      lastRefreshDurationMs: refreshState.lastDurationMs,
-      lastNewSummaries: refreshState.lastNewCount,
-      lastRecoveredFallbacks: refreshState.lastRecoveredCount,
-      lastPruned: refreshState.lastPruned,
-      lastEvicted: refreshState.lastEvicted,
-      lastScoreUpdates: refreshState.lastScoreUpdates,
-      lastGatedByPoints: refreshState.lastGatedByPoints,
-      lastGatedNoMetadata: refreshState.lastGatedNoMetadata,
-      lastMetadataMisses: refreshState.lastMetadataMisses,
-      minPointsToSummarize: MIN_POINTS_TO_SUMMARIZE,
-      totalRefreshes: refreshState.totalRefreshes,
-      refreshRunning: refreshState.running,
-      nextRefreshInSeconds: nextIn,
-      lastError: refreshState.lastError,
-      fallbacks,
-    });
-  }
-
-  if (url.pathname === "/" || url.pathname === "/index.html") {
-    const html = buildLandingPage(stories, {
-      updatedAt: cache.updatedAt,
-      totalCount: stories.length,
-      sort: sortParam(url.searchParams.get("sort")),
-    });
-    res.writeHead(200, {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "public, max-age=300",
-    });
-    res.end(html);
-    return;
-  }
-
-  if (url.pathname === "/feed" || url.pathname === "/feed.xml") {
-    const sort = sortParam(url.searchParams.get("sort"));
-    // Warm-up = "no servable stories yet" rather than "cache literally empty". The points
-    // view serves on-list stories only, so it's cold until something is on the list; the
-    // rolling date view can serve anything cached. Either way, return a retryable 503 rather
-    // than a valid-but-itemless feed while the first batch of summaries is still generating.
-    const warming =
-      sort === "points"
-        ? !stories.some((s) => s.onList !== false)
-        : stories.length === 0;
-    if (warming) {
-      res.writeHead(503, {
-        "content-type": "text/plain; charset=utf-8",
-        "retry-after": "60",
-      });
-      res.end("Feed warming up — first batch of summaries is generating. Try again shortly.");
-      return;
-    }
-    const count = clamp(
-      intParam(url.searchParams.get("count"), DEFAULT_FEED_COUNT),
-      1,
-      MAX_FEED_COUNT,
-    );
-    const minPoints = clamp(
-      intParam(url.searchParams.get("min_points"), 0),
-      0,
-      1_000_000,
-    );
-    const xml = buildFeedXml(stories, {
-      count,
-      minPoints,
-      sort,
-      updatedAt: cache.updatedAt,
-    });
-    res.writeHead(200, {
-      "content-type": "application/rss+xml; charset=utf-8",
-      "cache-control": "public, max-age=300",
-    });
-    res.end(xml);
-    return;
-  }
-
-  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-  res.end("Not found. Try / for usage or /feed for the RSS feed.");
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(body, null, 2));
+  const out = route(url, {
+    stories: getStories(cache),
+    updatedAt: cache.updatedAt,
+    state: refreshState,
+    summaryModel: SUMMARY_MODEL,
+    extraHeadHtml: options.extraHeadHtml,
+    uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    refreshRunning: refreshState.running,
+  });
+  res.writeHead(out.status, out.headers);
+  res.end(out.body);
 }
 
 export function startServer(): void {
