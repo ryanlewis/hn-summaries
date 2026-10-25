@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      # wrangler's esbuild and workerd find their platform binaries without their
+      # postinstall scripts, so nothing here needs them.
+      - run: bun install --frozen-lockfile --ignore-scripts
+
+      # Bun service, then `wrangler types` and the Worker (src/worker/tsconfig.json).
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Extraction over fixtures/articles, feed GUIDs over fixtures/cache.sample.json,
+      # the Worker's gateway seam, browser budget and refresh deps.
+      - name: Tests
+        run: bun test
+
+      # Bundles the Worker the way a deploy would, without uploading anything.
+      - name: Build Worker
+        run: bunx wrangler deploy --dry-run --outdir dist
+
+  # Deploys the Worker to workers.dev after the checks pass on main. The `production`
+  # environment's deployment-branch policy limits it to main, and the Cloudflare
+  # secrets live only there. Install runs without them; only the deploy step sees them.
+  deploy:
+    needs: [ci]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice title=Deploy skipped::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set in the production environment"
+            exit 0
+          fi
+          bunx wrangler deploy
