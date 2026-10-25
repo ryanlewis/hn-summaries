@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Notes on running a small RSS service | Example Blog</title>
+  <style>body { font-family: sans-serif; }</style>
+  <script>window.analytics = { track() {} };</script>
+</head>
+<body>
+  <header class="site-header">
+    <nav><a href="/">Home</a> <a href="/about">About</a> <a href="/archive">Archive</a> <a href="/subscribe">Subscribe</a></nav>
+  </header>
+  <aside class="sidebar">
+    <h3>Popular posts</h3>
+    <ul><li><a href="/a">Ten tips for tidy desks</a></li><li><a href="/b">Why I moved to tabs</a></li></ul>
+  </aside>
+  <main>
+    <article>
+      <h1>Notes on running a small RSS service</h1>
+      <p class="byline">By A. Writer, 3 October 2026</p>
+      <p>For two years I have run a small service that turns a ranked list of links into an RSS feed with a short summary under each entry. It refreshes once an hour, keeps everything in a single JSON file, and has never needed a database.</p>
+      <p>The hardest part was not the summaries. It was deciding what to leave out. A list that changes every hour produces far more entries than anyone wants to read, so the service only summarises a story once it has collected enough points to show that people care about it.</p>
+      <h2>Keeping the cache bounded</h2>
+      <p>The cache is bounded twice. A time bound drops entries that left the list more than three days ago, and a size bound evicts the oldest summaries first if the file ever grows past its cap. Entries still on the list are never evicted.</p>
+      <p>Because a summary is written once and kept, a restart costs nothing. Deleting the file is the only way to force everything to be summarised again, and even then a per-cycle cap spreads the work over several hours.</p>
+      <blockquote><p>Bound everything, and make the bounds visible.</p></blockquote>
+      <p>The status page reports how many entries were pruned, how many were evicted, and how many were held back by the points gate, so it is easy to tell a quiet day from a broken one.</p>
+    </article>
+  </main>
+  <section class="comments-widget"><p>Comments are closed. Sign in to view 14 comments.</p></section>
+  <footer><p>© 2026 Example Blog. All rights reserved. <a href="/privacy">Privacy</a> <a href="/terms">Terms</a></p></footer>
+</body>
+</html>
