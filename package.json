@@ -7,19 +7,24 @@
   "scripts": {
     "start": "bun index.ts",
     "dev": "CACHE_PATH=fixtures/cache.sample.json REFRESH_DISABLED=1 bun index.ts",
-    "typecheck": "tsc --noEmit",
-    "install-browser": "bunx playwright install chromium"
+    "typecheck": "tsc --noEmit && bun run worker:types && tsc --noEmit -p src/worker",
+    "install-browser": "bunx playwright install chromium",
+    "worker:types": "wrangler types",
+    "worker:dev": "wrangler dev",
+    "test": "bun test"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "feed": "^5.2.1",
     "jsdom": "^29.1.1",
+    "linkedom": "0.18.13",
     "ls": "^1.0.0",
     "p-limit": "^7.3.0"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
     "@types/node": "^26.0.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "wrangler": "4.149.0"
   }
 }

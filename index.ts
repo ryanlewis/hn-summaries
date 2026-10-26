@@ -1,8 +1,29 @@
 // Entrypoint: start the HTTP server, run an initial refresh, then refresh hourly.
-import { REFRESH_DISABLED, REFRESH_INTERVAL_MS } from "./src/config.js";
-import { ensureChromePath } from "./src/extract-browser.js";
-import { runRefresh } from "./src/refresh.js";
+import { loadCache, saveCache } from "./src/cache.js";
+import {
+  BROWSER_FALLBACK_ENABLED,
+  REFRESH_DISABLED,
+  REFRESH_INTERVAL_MS,
+} from "./src/config.js";
+import { htmlToArticleText, htmlToText } from "./src/dom-jsdom.js";
+import { ensureChromePath, extractArticleViaBrowser } from "./src/extract-browser.js";
+import { extractArticleTextTiered } from "./src/extract.js";
+import { runRefresh, type RefreshDeps } from "./src/refresh.js";
 import { startServer } from "./src/server.js";
+import { summarize } from "./src/summarize.js";
+
+const deps: RefreshDeps = {
+  loadCache,
+  saveCache,
+  extractArticle: (url) =>
+    extractArticleTextTiered(
+      url,
+      htmlToArticleText,
+      BROWSER_FALLBACK_ENABLED ? extractArticleViaBrowser : undefined,
+    ),
+  htmlToText,
+  summarize,
+};
 
 async function main(): Promise<void> {
   // Serve immediately (returns 503 on /feed until the cache has stories).
@@ -20,9 +41,9 @@ async function main(): Promise<void> {
   ensureChromePath();
 
   // Kick off the first refresh, then schedule subsequent ones.
-  await runRefresh();
+  await runRefresh(deps);
   setInterval(() => {
-    void runRefresh();
+    void runRefresh(deps);
   }, REFRESH_INTERVAL_MS);
 }
 

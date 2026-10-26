@@ -16,7 +16,7 @@ import {
   SUMMARY_PROVIDER,
 } from "./config.js";
 
-const SYSTEM_PROMPT =
+export const SYSTEM_PROMPT =
   "You are a concise technical news summarizer for an RSS feed. " +
   "Write plain prose only: no markdown, no bullet points, no headings, no links, " +
   'and no preamble such as "This article" or "The author". ' +
@@ -33,7 +33,7 @@ export interface SummarizeInput {
   commentsText: string;
 }
 
-class LLMError extends Error {
+export class LLMError extends Error {
   status?: number;
   constructor(message: string, status?: number) {
     super(message);
@@ -41,10 +41,13 @@ class LLMError extends Error {
   }
 }
 
+/** The user turn for a story: the article prompt, or the discussion-only fallback. */
+export function buildUserMessage(input: SummarizeInput): string {
+  return input.articleText ? buildArticlePrompt(input) : buildFallbackPrompt(input);
+}
+
 export async function summarize(input: SummarizeInput): Promise<string> {
-  const userMessage = input.articleText
-    ? buildArticlePrompt(input)
-    : buildFallbackPrompt(input);
+  const userMessage = buildUserMessage(input);
   const call =
     SUMMARY_PROVIDER === "anthropic"
       ? () => callAnthropic(userMessage)
@@ -81,7 +84,7 @@ ${i.commentsText || "(no comments yet)"}
 In 3-5 sentences, explain what this story is about based on the title and discussion, then 1-2 sentences on how the Hacker News community is reacting. Begin your response with "Article unavailable — ". Keep the whole thing under 120 words.`;
 }
 
-async function callWithRetry(fn: () => Promise<string>): Promise<string> {
+export async function callWithRetry(fn: () => Promise<string>): Promise<string> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));

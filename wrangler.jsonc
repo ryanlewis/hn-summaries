@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hn-summaries",
+  "main": "src/worker/index.ts",
+  // quickAction() on the browser binding needs 2026-03-24 or later.
+  "compatibility_date": "2026-10-01",
+  // process.env (src/config.ts reads its overrides there, populated from "vars") and
+  // the node: built-ins the shared modules import.
+  "compatibility_flags": ["nodejs_compat"],
+  // Favicons and og.png. Matching paths are served without running the Worker;
+  // everything else (/, /feed, /status, ...) falls through to it.
+  "assets": { "directory": "./public" },
+  // The cache: one JSON document, the same shape as the VM's data/cache.json, plus the
+  // last refresh's telemetry for /status. No ID: wrangler creates it on first deploy.
+  "kv_namespaces": [{ "binding": "CACHE" }],
+  // AI Gateway + Workers AI. Pre-authenticated, so no token in the Worker.
+  "ai": { "binding": "AI" },
+  // Browser Rendering, the fallback extraction tier (Quick Actions /content).
+  "browser": { "binding": "BROWSER" },
+  // Hourly. The VM refreshes on its own boot-relative hour; the two never share state.
+  "triggers": { "crons": ["7 * * * *"] },
+  "vars": {
+    // Canonical origin for feed and page links, as on the VM. Kept at hn.rlew.io during
+    // the workers.dev soak so the two feeds can be compared byte for byte.
+    "PUBLIC_URL": "https://hn.rlew.io"
+  },
+  "observability": { "enabled": true }
+}

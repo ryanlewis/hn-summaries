@@ -4,3 +4,6 @@ data/
 .claude/settings.local.json
 smoke.ts
 local.options.json
+.wrangler/
+worker-configuration.d.ts
+dist/

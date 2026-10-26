@@ -9,16 +9,10 @@ import {
   FEED_URL,
   type FeedSort,
   HN_COMMENTS_URL,
-  LLM_MODEL,
   MAX_FEED_COUNT,
-  OPENAI_MODEL,
   PUBLIC_ORIGIN,
   REPO_URL,
-  SUMMARY_PROVIDER,
 } from "./config.js";
-import { options } from "./options.js";
-
-const SUMMARY_MODEL = SUMMARY_PROVIDER === "anthropic" ? LLM_MODEL : OPENAI_MODEL;
 
 // --- Static page metadata (title / description / social-share card) ---
 // Title is shared by <title>, og:title and twitter:title; description likewise. The
@@ -61,7 +55,13 @@ function shortDate(unixSeconds: number): string {
 
 export function buildLandingPage(
   stories: CachedStory[],
-  meta: { updatedAt: number; totalCount: number; sort: FeedSort },
+  meta: {
+    updatedAt: number;
+    totalCount: number;
+    sort: FeedSort;
+    summaryModel: string;
+    extraHeadHtml?: string;
+  },
 ): string {
   const { sort } = meta;
   const listSize = bestListSize(stories);
@@ -242,7 +242,7 @@ export function buildLandingPage(
 ${/* Deliberately raw, UNescaped: operator-controlled <head> HTML (analytics tag, site
      verification). Trust boundary is the local options file / EXTRA_HEAD_HTML env — never
      populate either from untrusted input, as the value executes on every page view. */
-""}${options.extraHeadHtml ?? ""}
+""}${meta.extraHeadHtml ?? ""}
 </head>
 <body>
 <div class="wrap">
@@ -279,7 +279,7 @@ ${/* Deliberately raw, UNescaped: operator-controlled <head> HTML (analytics tag
   }</p>
   ${body}
 
-  <footer>Refreshes hourly · summaries by ${escapeHtml(SUMMARY_MODEL)} · <a href="${REPO_URL}">source on GitHub</a> · content © its authors</footer>
+  <footer>Refreshes hourly · summaries by ${escapeHtml(meta.summaryModel)} · <a href="${REPO_URL}">source on GitHub</a> · content © its authors</footer>
 </div>
 <script>
   document.querySelector(".copy")?.addEventListener("click", async (e) => {
