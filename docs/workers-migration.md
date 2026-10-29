@@ -2,13 +2,13 @@
 
 This doc covers moving hn-summaries off the `hn-summaries` exe.dev VM (Bun, headless Chromium, up to 1 GB of memory) onto a Cloudflare Worker. It records the design choices, the model cost and quality comparison, the workers.dev soak, and the cutover runbook.
 
-Last updated 2026-10-25.
+Last updated 2026-10-29.
 
 ## Where it stands
 
-- **Branch and PR:** `feat/hn-summaries`. The PR targets `main` and merges at cutover.
-- **What runs where:** the VM still serves hn.rlew.io from `main`, unchanged. The Worker runs this branch at https://hn-summaries.ryan-9f5.workers.dev, deployed by hand, refreshing hourly at :07 UTC from its own cold cache.
-- **Next:** Ryan's gates (see [What Ryan needs to do](#what-ryan-needs-to-do)), then the [cutover runbook](#cutover-runbook).
+- **Cut over 2026-10-29.** https://hn.rlew.io is served by the Worker as a Custom Domain since 19:10 UTC ([PR #5](https://github.com/ryanlewis/hn-summaries/pull/5), #6), on Workers AI `deepseek-v4.1-flash-1017`. The cache was seeded from the VM first, so the feeds carried on unchanged.
+- **The VM** still runs as the rollback.
+- **Next:** check Miniflux for duplicates, stop the VM service (runbook step 3, gated), then [What to delete afterwards](#what-to-delete-afterwards-gated) after a few clean days. CI deploys skip until the `production` environment has its two secrets; deploy by hand until then.
 
 ## Deployed resources
 
