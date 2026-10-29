@@ -176,7 +176,7 @@ Without them, the deploy job skips with a notice and CI stays green.
 
 ## Cutover runbook
 
-Each step has a check. Don't start the next step until the check passes. Steps marked **gated** change production and need Ryan's go-ahead on the day. Nothing here has been run yet.
+Each step has a check. Don't start the next step until the check passes. Steps marked **gated** change production and need Ryan's go-ahead on the day. Steps 1, 2 and 4 were run on 2026-10-29 (cache seeded from the VM at 19:09 UTC, all three feeds byte-identical; hn.rlew.io on the Worker from 19:10 UTC), staying on Workers AI `deepseek-v4.1-flash-1017`.
 
 **1. Merge the PR into `main`.** CI's deploy job deploys `main` to workers.dev (or skips without secrets; then run `bunx wrangler deploy` by hand).
 
@@ -204,7 +204,7 @@ done
 
 **4. Attach hn.rlew.io to the Worker (gated, DNS).** The `rlew.io` zone is already on Cloudflare (`lara`/`kirk.ns.cloudflare.com`). `hn` is a CNAME to `hn-summaries.exe.xyz` resolving straight to the exe.dev edge, so it is grey (DNS only). A Workers Custom Domain needs that record gone:
 
-1. Delete the `hn` CNAME in the dashboard (DNS → Records). Wrangler can take it over, but a non-interactive deploy does so without asking (edpi-app found this in wrangler 4.141), so do this step by hand.
+1. Delete the `hn` CNAME (`cf dns records list --zone rlew.io --name-exact hn.rlew.io`, then `cf dns records delete --zone rlew.io <id> --force`, or the dashboard). A non-interactive wrangler 4.148 deploy does not take it over: it fails the domain step with code 100117 ("already has externally managed DNS records").
 2. Add `"routes": [{ "pattern": "hn.rlew.io", "custom_domain": true }]` to `wrangler.jsonc` and run `bunx wrangler deploy` from a terminal, logged in as Ryan (`bunx wrangler whoami` lists `zone (read)` and `workers_routes (write)`).
 
 Between the two, hn.rlew.io doesn't resolve for up to a minute. Readers retry on their next poll.
