@@ -20,9 +20,11 @@
   // Hourly. The VM refreshes on its own boot-relative hour; the two never share state.
   "triggers": { "crons": ["7 * * * *"] },
   "vars": {
-    // Canonical origin for feed and page links, as on the VM. Kept at hn.rlew.io during
-    // the workers.dev soak so the two feeds can be compared byte for byte.
+    // Canonical origin for feed and page links.
     "PUBLIC_URL": "https://hn.rlew.io"
   },
+  // hn.rlew.io as a Custom Domain; workers.dev stays on so deploys need no Zone Read.
+  "workers_dev": true,
+  "routes": [{ "pattern": "hn.rlew.io", "custom_domain": true }],
   "observability": { "enabled": true }
 }
