@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
-    "feed": "^5.2.1",
+    "feed": "^6.0.0",
     "jsdom": "^29.1.1",
     "linkedom": "0.18.13",
     "ls": "^1.0.0",
