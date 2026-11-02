@@ -24,7 +24,7 @@
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
     "@types/node": "^26.0.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.0",
     "wrangler": "4.149.0"
   }
 }
