@@ -22,7 +22,7 @@
     "p-limit": "^7.3.0"
   },
   "devDependencies": {
-    "@types/jsdom": "^28.0.3",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.0.0",
     "typescript": "^6.0.3",
     "wrangler": "4.149.0"
